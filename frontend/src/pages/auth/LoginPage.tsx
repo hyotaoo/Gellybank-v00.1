@@ -1,21 +1,25 @@
 import BrandPanel from '@/components/auth/BrandPanel';
 import LoginIllustration from '@/components/auth/LoginIllustration';
-import rightBg from '@/assets/gelly-right-bg.png';
+import useFitScale, { DESIGN_HEIGHT, DESIGN_WIDTH } from '@/hooks/useFitScale';
 
-const LoginPage = () => (
-  <div className="flex min-h-screen w-full justify-center bg-brand-gradient font-sans text-ink">
-    <div className="relative flex min-h-screen w-full max-w-[1440px] flex-col overflow-hidden bg-brand-gradient lg:h-screen lg:flex-row">
-      <BrandPanel />
-      <LoginIllustration />
+const LoginPage = () => {
+  const scale = useFitScale();
 
-      <img
-        src={rightBg}
-        alt=""
-        aria-hidden="true"
-        className="pointer-events-none absolute left-[1369px] top-0 hidden h-[683px] w-[683px] max-w-none object-cover lg:block"
-      />
+  return (
+    <div className="flex h-[100dvh] w-full items-center justify-center overflow-hidden bg-brand-gradient font-sans text-ink">
+      <div
+        className="relative flex shrink-0 overflow-hidden bg-brand-gradient"
+        style={{
+          width: DESIGN_WIDTH,
+          height: DESIGN_HEIGHT,
+          transform: `scale(${scale})`,
+        }}
+      >
+        <BrandPanel />
+        <LoginIllustration />
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default LoginPage;

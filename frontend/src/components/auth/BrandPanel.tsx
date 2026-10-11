@@ -2,12 +2,12 @@ import CreateAccountButton from '@/components/auth/CreateAccountButton';
 import LoginForm from '@/components/auth/LoginForm';
 
 const BrandPanel = () => (
-  <section className="relative z-10 flex w-full flex-col gap-10 px-6 pb-[72px] pt-16 lg:w-[686px] lg:flex-none lg:pl-[72px] lg:pr-6 lg:pt-[120px]">
-    <h1 className="max-w-[590px] text-[56px] font-black leading-none text-white sm:text-[72px] lg:text-[96px]">
+  <section className="relative z-10 flex w-[686px] flex-none flex-col gap-10 pb-[72px] pl-[72px] pr-6 pt-[120px]">
+    <h1 className="max-w-[590px] text-[96px] font-black leading-none text-white">
       Welcome to Gelly<span className="text-brand-accent">Bank!</span>
     </h1>
 
-    <p className="text-[16px] font-normal leading-[1.21] text-ink sm:text-[20px]">
+    <p className="text-[20px] font-normal leading-[1.21] text-ink">
       Banking doesn’t have to be stressful.
     </p>
 
