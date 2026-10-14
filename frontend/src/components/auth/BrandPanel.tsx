@@ -1,26 +1,69 @@
+import { useEffect, useState } from 'react';
 import CreateAccountButton from '@/components/auth/CreateAccountButton';
 import LoginForm from '@/components/auth/LoginForm';
 
-const BrandPanel = () => (
-  <section className="relative z-10 flex w-[686px] flex-none flex-col gap-10 pb-[72px] pl-[72px] pr-6 pt-[120px]">
-    <h1 className="max-w-[590px] text-[96px] font-black leading-none text-white">
-      Welcome to Gelly<span className="text-brand-accent">Bank!</span>
-    </h1>
+const TYPE_SPEED = 90;
+const HOLD_DURATION = 3000;
+const WHITE_TEXT = 'Welcome to Gelly';
+const ACCENT_TEXT = 'Bank!';
+const FULL_TEXT = `${WHITE_TEXT}${ACCENT_TEXT}`;
 
-    <p className="text-[20px] font-normal leading-[1.21] text-ink">
-      Banking doesn’t have to be stressful.
-    </p>
+const useTypingEffect = (text: string, speed: number, hold: number) => {
+  const [count, setCount] = useState(0);
 
-    <div className="flex w-full max-w-[513px] flex-col gap-4">
-      <CreateAccountButton />
-      <p className="text-center text-[14px] font-medium leading-[1.21] text-ink">
-        Already have an account?
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setCount(text.length);
+      return;
+    }
+
+    if (count === text.length) {
+      const timer = window.setTimeout(() => setCount(0), hold);
+      return () => window.clearTimeout(timer);
+    }
+
+    const timer = window.setTimeout(() => setCount((current) => current + 1), speed);
+    return () => window.clearTimeout(timer);
+  }, [count, text, speed, hold]);
+
+  return count;
+};
+
+const BrandPanel = () => {
+  const count = useTypingEffect(FULL_TEXT, TYPE_SPEED, HOLD_DURATION);
+  const whiteVisible = WHITE_TEXT.slice(0, count);
+  const accentVisible = ACCENT_TEXT.slice(0, Math.max(0, count - WHITE_TEXT.length));
+
+  return (
+    <section className="relative z-10 flex w-[686px] flex-none flex-col gap-10 pb-[72px] pl-[72px] pr-6 pt-[120px]">
+      <h1 className="relative max-w-[590px] text-[96px] font-black leading-none text-white">
+        <span aria-hidden="true" className="invisible">
+          {WHITE_TEXT}
+          <span className="text-brand-accent">{ACCENT_TEXT}</span>
+        </span>
+        <span aria-hidden="true" className="absolute inset-0">
+          {whiteVisible}
+          <span className="text-brand-accent">{accentVisible}</span>
+          <span className="ml-1 inline-block h-[0.82em] w-[0.06em] translate-y-[0.08em] bg-brand-accent align-baseline animate-caret" />
+        </span>
+        <span className="sr-only">{FULL_TEXT}</span>
+      </h1>
+
+      <p className="text-[20px] font-normal leading-[1.21] text-ink">
+        Banking doesn’t have to be stressful.
       </p>
-      <LoginForm />
-    </div>
 
-    <span className="pointer-events-none absolute bottom-[-140px] left-[-80px] h-[260px] w-[260px] rounded-full bg-white/10" />
-  </section>
-);
+      <div className="flex w-full max-w-[513px] flex-col gap-4">
+        <CreateAccountButton />
+        <p className="text-center text-[14px] font-medium leading-[1.21] text-ink">
+          Already have an account?
+        </p>
+        <LoginForm />
+      </div>
+
+      <span className="pointer-events-none absolute bottom-[-140px] left-[-80px] h-[260px] w-[260px] rounded-full bg-white/10" />
+    </section>
+  );
+};
 
 export default BrandPanel;

@@ -45,6 +45,31 @@
   }
 }
 
+@keyframes caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  95% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.animate-caret {
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-caret {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 @layer base {
   :root {
     font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;

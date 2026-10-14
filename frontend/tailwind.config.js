@@ -8,6 +8,7 @@ export default {
       },
       colors: {
         ink: '#30292C',
+        muted: '#9C9496',
         primary: {
           DEFAULT: '#D987A3',
           hover: '#BD5980',
@@ -15,6 +16,8 @@ export default {
         surface: {
           card: '#FCF1F5',
           input: '#F8E7B9',
+          soft: '#FCF5E3',
+          line: '#F2ECE7',
         },
         disabled: {
           bg: '#F0E8EB',
