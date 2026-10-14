@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+backend/venv/
+
+# Local secrets (database password, secret key)
+backend/.env
+
+# Local frontend config (copy frontend/.env.example instead)
+frontend/.env
+
+# Node / frontend build output
+frontend/node_modules/
+frontend/dist/
