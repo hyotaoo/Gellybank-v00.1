@@ -21,8 +21,8 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise SystemExit(
-        "No DATABASE_URL found. Copy backend/.env.example to backend/.env, "
-        "fill in your MySQL user and password, then start the app again."
+        "No DATABASE_URL found. Run 'python dev.py' from the repo root to "
+        "create backend/.env, then start the app again."
     )
 
 TOKEN_MAX_AGE = 60 * 60 * 24  
