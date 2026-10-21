@@ -1,13 +1,13 @@
-
-
 import os
 import random
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from functools import wraps
+from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -42,6 +42,13 @@ db = SQLAlchemy()
 db.init_app(app)
 
 
+class BaseModel(db.Model):
+    __abstract__ = True
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
+
 
 DEFAULT_CURRENCY = "PHP"
 CENT = Decimal("0.01")
@@ -49,7 +56,14 @@ CENT = Decimal("0.01")
 
 def to_money(value):
     try:
-        return Decimal(str(value)).quantize(CENT, rounding=ROUND_HALF_UP)
+        amount = Decimal(str(value))
+        if not amount.is_finite():
+            raise ValueError("Enter a valid amount.")
+        amount = amount.quantize(CENT, rounding=ROUND_HALF_UP)
+        # DECIMAL(15, 2) allows at most 13 digits before the decimal point.
+        if abs(amount) >= Decimal("10000000000000"):
+            raise ValueError("Amount is too large.")
+        return amount
     except (InvalidOperation, TypeError, ValueError):
         raise ValueError("Enter a valid amount.")
 
@@ -86,7 +100,12 @@ def as_int(value):
 
 
 def body():
-    return request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def clean_text(value):
+    return value.strip() if isinstance(value, str) else ""
 
 
 def error(message, status=400, code=None):
@@ -117,15 +136,27 @@ def current_user():
         try:
             data = serializer.loads(header[7:], salt="auth", max_age=TOKEN_MAX_AGE)
             user = db.session.get(AppUser, data.get("user_id"))
-            if user:
+            if user and user.is_active:
                 return user
         except (BadSignature, SignatureExpired):
-            pass  
-    return AppUser.query.filter_by(username=DEMO_EMAIL).first()
+            pass
+    return None
+
+
+def auth_required(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        current = current_user()
+        if current is None:
+            return error("Authentication required.", 401, "unauthorized")
+        g.user = current
+        return view(*args, **kwargs)
+
+    return wrapper
 
 
 
-class Customer(db.Model):
+class Customer(BaseModel):
     __tablename__ = "customers"
 
     customer_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
@@ -146,7 +177,7 @@ class Customer(db.Model):
         return " ".join(part for part in parts if part)
 
 
-class AppUser(db.Model):
+class AppUser(BaseModel):
     __tablename__ = "app_users"
 
     user_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
@@ -176,7 +207,7 @@ class AppUser(db.Model):
         }
 
 
-class AccountType(db.Model):
+class AccountType(BaseModel):
     __tablename__ = "account_types"
 
     account_type_id = db.Column(db.SmallInteger, primary_key=True, autoincrement=True)
@@ -187,7 +218,7 @@ class AccountType(db.Model):
     created_at = db.Column(db.DateTime, default=utcnow)
 
 
-class BankAccount(db.Model):
+class BankAccount(BaseModel):
     __tablename__ = "bank_accounts"
 
     account_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
@@ -226,7 +257,7 @@ class BankAccount(db.Model):
         }
 
 
-class Transfer(db.Model):
+class Transfer(BaseModel):
     __tablename__ = "transfers"
 
     transfer_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
@@ -241,7 +272,7 @@ class Transfer(db.Model):
     completed_at = db.Column(db.DateTime)
 
 
-class Transaction(db.Model):
+class Transaction(BaseModel):
     __tablename__ = "transactions"
 
     transaction_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
@@ -297,7 +328,7 @@ class Transaction(db.Model):
         }
 
 
-class BankCard(db.Model):
+class BankCard(BaseModel):
     __tablename__ = "bank_cards"
 
     card_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
@@ -319,7 +350,7 @@ class BankCard(db.Model):
         }
 
 
-class Beneficiary(db.Model):
+class Beneficiary(BaseModel):
     __tablename__ = "beneficiaries"
 
     beneficiary_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
@@ -359,8 +390,9 @@ def my_account(account_id, user):
 
 
 @app.get("/api/accounts")
+@auth_required
 def list_accounts():
-    user = current_user()
+    user = g.user
     if not user.customer_id:
         return jsonify([])
 
@@ -375,8 +407,9 @@ def list_accounts():
 
 
 @app.post("/api/accounts")
+@auth_required
 def create_account():
-    user = current_user()
+    user = g.user
     if not user.customer_id:
         return error("No customer profile for this user.", 400, "no_customer")
 
@@ -401,6 +434,19 @@ def create_account():
         interest_rate=account_type.default_interest_rate,
     )
     db.session.add(account)
+    db.session.flush()
+
+    if initial > 0:
+        db.session.add(Transaction(
+            account_id=account.account_id,
+            transaction_type="DEPOSIT",
+            amount=initial,
+            balance_after=initial,
+            reference_code=new_reference(),
+            description="Initial deposit",
+            performed_by_user_id=user.user_id,
+        ))
+
     db.session.commit()
 
     primary = primary_account_id(user.customer_id)
@@ -408,8 +454,9 @@ def create_account():
 
 
 @app.get("/api/accounts/<account_id>")
+@auth_required
 def get_account(account_id):
-    user = current_user()
+    user = g.user
     account = my_account(account_id, user)
     if not account:
         return error("Account not found.", 404, "not_found")
@@ -419,8 +466,9 @@ def get_account(account_id):
 
 
 @app.patch("/api/accounts/<account_id>")
+@auth_required
 def update_account(account_id):
-    user = current_user()
+    user = g.user
     account = my_account(account_id, user)
     if not account:
         return error("Account not found.", 404, "not_found")
@@ -430,8 +478,9 @@ def update_account(account_id):
 
 
 @app.delete("/api/accounts/<account_id>")
+@auth_required
 def close_account(account_id):
-    account = my_account(account_id, current_user())
+    account = my_account(account_id, g.user)
     if not account:
         return error("Account not found.", 404, "not_found")
     if account.current_balance != 0:
@@ -459,8 +508,9 @@ def my_transaction(tx_id, user):
 
 
 @app.get("/api/transactions")
+@auth_required
 def list_transactions():
-    user = current_user()
+    user = g.user
     if not user.customer_id:
         return jsonify([])
 
@@ -483,8 +533,9 @@ def list_transactions():
 
 
 @app.post("/api/transactions")
+@auth_required
 def create_transaction():
-    user = current_user()
+    user = g.user
     data = body()
 
     account = my_account(data.get("accountId"), user)
@@ -518,7 +569,7 @@ def create_transaction():
         amount=amount,
         balance_after=account.current_balance,
         reference_code=new_reference(),
-        description=(data.get("note") or "").strip() or None,
+        description=clean_text(data.get("note")) or None,
         performed_by_user_id=user.user_id,
     )
     db.session.add(tx)
@@ -527,8 +578,9 @@ def create_transaction():
 
 
 @app.post("/api/transactions/transfer")
+@auth_required
 def create_transfer():
-    user = current_user()
+    user = g.user
     data = body()
 
     source = my_account(data.get("sourceAccountId"), user)
@@ -553,6 +605,8 @@ def create_transfer():
             return error("Destination account not found.", 404, "not_found")
         if destination.account_id == source.account_id:
             return error("Choose a different destination account.", 400, "same_account")
+        if destination.status != "ACTIVE":
+            return error("The destination account is not active.", 400, "destination_inactive")
     else:
         beneficiary = Beneficiary.query.filter_by(
             beneficiary_id=as_int(data.get("beneficiaryId")),
@@ -560,8 +614,12 @@ def create_transfer():
         ).first()
         if not beneficiary:
             return error("Recipient not found.", 404, "not_found")
+        # Beneficiaries can refer to accounts outside this bank. There is no
+        # external payment rail configured, so never debit funds for an
+        # external transfer that cannot be delivered.
+        return error("External transfers are not available yet.", 501, "external_transfer_unavailable")
 
-    note = (data.get("note") or "").strip() or None
+    note = clean_text(data.get("note")) or None
     reference = new_reference()
 
     try:
@@ -614,21 +672,60 @@ def create_transfer():
 
 
 @app.patch("/api/transactions/<tx_id>")
+@auth_required
 def update_note(tx_id):
-    tx = my_transaction(tx_id, current_user())
+    tx = my_transaction(tx_id, g.user)
     if not tx:
         return error("Transaction not found.", 404, "not_found")
 
-    tx.description = (body().get("note") or "").strip() or None
+    tx.description = clean_text(body().get("note")) or None
     db.session.commit()
     return jsonify(tx.to_dict())
 
 
 @app.delete("/api/transactions/<tx_id>")
+@auth_required
 def void_transaction(tx_id):
-    tx = my_transaction(tx_id, current_user())
+    tx = my_transaction(tx_id, g.user)
     if not tx:
         return error("Transaction not found.", 404, "not_found")
+    if tx.status == "VOID":
+        return "", 204
+
+    account = db.session.get(BankAccount, tx.account_id)
+    if account is None:
+        return error("Account not found.", 404, "not_found")
+    amount = tx.amount
+
+    if tx.transaction_type == "DEPOSIT":
+        if account.current_balance < amount:
+            return error("Cannot void: the funds have already been spent.", 400, "insufficient_funds")
+        account.current_balance -= amount
+    elif tx.transaction_type == "WITHDRAWAL":
+        account.current_balance += amount
+    elif tx.transaction_type == "TRANSFER_OUT":
+        if tx.transfer_id:
+            transfer = db.session.get(Transfer, tx.transfer_id)
+            if transfer:
+                destination = db.session.get(BankAccount, transfer.to_account_id)
+                if destination is None:
+                    return error("Destination account not found.", 404, "not_found")
+                if destination.current_balance < amount:
+                    return error(
+                        "Cannot void: the recipient has already spent the funds.",
+                        400,
+                        "insufficient_funds",
+                    )
+                destination.current_balance -= amount
+                paired = Transaction.query.filter_by(
+                    transfer_id=transfer.transfer_id, transaction_type="TRANSFER_IN"
+                ).first()
+                if paired:
+                    paired.status = "VOID"
+                transfer.status = "CANCELLED"
+        account.current_balance += amount
+    else:
+        return error("This transaction cannot be voided.", 400, "invalid_void")
 
     tx.status = "VOID"
     db.session.commit()
@@ -645,8 +742,9 @@ def my_beneficiary(ben_id, user):
 
 
 @app.get("/api/beneficiaries")
+@auth_required
 def list_beneficiaries():
-    user = current_user()
+    user = g.user
     if not user.customer_id:
         return jsonify([])
 
@@ -660,14 +758,15 @@ def list_beneficiaries():
 
 
 @app.post("/api/beneficiaries")
+@auth_required
 def create_beneficiary():
-    user = current_user()
+    user = g.user
     if not user.customer_id:
         return error("No customer profile for this user.", 400, "no_customer")
 
     data = body()
-    name = (data.get("name") or "").strip()
-    account_number = (data.get("accountNumber") or "").strip()
+    name = clean_text(data.get("name"))
+    account_number = clean_text(data.get("accountNumber"))
     if not name or not account_number:
         return error("Name and account number are required.", 400, "invalid_input")
 
@@ -675,7 +774,7 @@ def create_beneficiary():
         customer_id=user.customer_id,
         name=name,
         account_number=account_number,
-        bank=(data.get("bank") or "").strip() or None,
+        bank=clean_text(data.get("bank")) or None,
     )
     db.session.add(item)
     db.session.commit()
@@ -683,26 +782,28 @@ def create_beneficiary():
 
 
 @app.patch("/api/beneficiaries/<ben_id>")
+@auth_required
 def update_beneficiary(ben_id):
-    item = my_beneficiary(ben_id, current_user())
+    item = my_beneficiary(ben_id, g.user)
     if not item:
         return error("Beneficiary not found.", 404, "not_found")
 
     data = body()
     if data.get("name"):
-        item.name = str(data["name"]).strip()
+        item.name = clean_text(data["name"])
     if data.get("accountNumber"):
-        item.account_number = str(data["accountNumber"]).strip()
+        item.account_number = clean_text(data["accountNumber"])
     if "bank" in data:
-        item.bank = (data.get("bank") or "").strip() or None
+        item.bank = clean_text(data.get("bank")) or None
 
     db.session.commit()
     return jsonify(item.to_dict())
 
 
 @app.delete("/api/beneficiaries/<ben_id>")
+@auth_required
 def delete_beneficiary(ben_id):
-    item = my_beneficiary(ben_id, current_user())
+    item = my_beneficiary(ben_id, g.user)
     if not item:
         return error("Beneficiary not found.", 404, "not_found")
 
@@ -713,8 +814,9 @@ def delete_beneficiary(ben_id):
 
 
 @app.post("/api/cards/request")
+@auth_required
 def request_card():
-    user = current_user()
+    user = g.user
     if not user.customer_id:
         return error("No customer profile for this user.", 400, "no_customer")
 
@@ -756,8 +858,9 @@ def request_card():
 
 
 @app.get("/api/insights/spending")
+@auth_required
 def spending():
-    user = current_user()
+    user = g.user
     account_id = request.args.get("accountId")
 
     if not user.customer_id:
@@ -817,24 +920,29 @@ def join_phone(country_code, phone):
 @app.post("/api/auth/register")
 def register():
     data = body()
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
+    email = clean_text(data.get("email")).lower()
+    raw_password = data.get("password")
+    password = raw_password if isinstance(raw_password, str) else ""
+    first_name = clean_text(data.get("firstName"))
+    last_name = clean_text(data.get("lastName"))
 
     if "@" not in email or "." not in email:
         return error("Enter a valid email address.", 400, "invalid_email")
     if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
         return error("Password needs 8+ characters with a letter and a number.", 400, "weak_password")
+    if not first_name or not last_name:
+        return error("First and last name are required.", 400, "invalid_input")
     if AppUser.query.filter_by(username=email).first() or Customer.query.filter_by(email=email).first():
         return error("An account with that email already exists.", 409, "email_taken")
 
     customer = Customer(
-        first_name=(data.get("firstName") or "").strip(),
-        middle_name=(data.get("middleName") or "").strip() or None,
-        last_name=(data.get("lastName") or "").strip(),
+        first_name=first_name,
+        middle_name=clean_text(data.get("middleName")) or None,
+        last_name=last_name,
         date_of_birth=parse_date(data.get("birthdate")),
         email=email,
         phone=join_phone(data.get("countryCode"), data.get("phone")),
-        address=(data.get("address") or "").strip() or None,
+        address=clean_text(data.get("address")) or None,
     )
     db.session.add(customer)
     db.session.flush()  
@@ -854,8 +962,9 @@ def register():
 @app.post("/api/auth/login")
 def login():
     data = body()
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
+    email = clean_text(data.get("email")).lower()
+    raw_password = data.get("password")
+    password = raw_password if isinstance(raw_password, str) else ""
 
     user = AppUser.query.filter_by(username=email).first()
     if not user or not user.is_active or not check_password(user.password_hash, password):

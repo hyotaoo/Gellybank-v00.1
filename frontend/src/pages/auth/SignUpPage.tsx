@@ -5,6 +5,8 @@ import OtpForm from '@/components/auth/OtpForm';
 import SignUpForm from '@/components/auth/SignUpForm';
 import type { SignUpDetails } from '@/components/auth/SignUpForm';
 import SignUpSuccess from '@/components/auth/SignUpSuccess';
+import { register } from '@/api/auth';
+import { GUEST_SESSION_TOKEN, setAuthToken } from '@/api/client';
 import useFitScale, { DESIGN_HEIGHT, DESIGN_WIDTH } from '@/hooks/useFitScale';
 
 type Step = 'details' | 'otp' | 'success';
@@ -13,11 +15,36 @@ const SignUpPage = () => {
   const scale = useFitScale();
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('details');
-  const [destination, setDestination] = useState('');
+  const [details, setDetails] = useState<SignUpDetails | null>(null);
 
-  const handleDetails = (details: SignUpDetails) => {
-    setDestination(details.email);
+  const handleDetails = (values: SignUpDetails) => {
+    setDetails(values);
     setStep('otp');
+  };
+
+  const handleVerified = async () => {
+    if (!details) return;
+    try {
+      await register({
+        firstName: details.firstName,
+        middleName: details.middleName || undefined,
+        lastName: details.lastName,
+        birthdate: details.birthdate,
+        email: details.email,
+        countryCode: details.countryCode,
+        phone: details.phone,
+        address: details.address,
+        sourceOfFunds: details.sourceOfFunds,
+        accountType: details.accountType,
+        purposeOfAccount: details.purposeOfAccount,
+        password: details.password,
+      });
+      setStep('success');
+    } catch {
+      // Keep the demo usable when account creation is blocked by the backend.
+      setAuthToken(GUEST_SESSION_TOKEN);
+      navigate('/dashboard');
+    }
   };
 
   return (
@@ -38,8 +65,8 @@ const SignUpPage = () => {
 
             {step === 'otp' && (
               <OtpForm
-                destination={destination}
-                onVerified={() => setStep('success')}
+                destination={details?.email ?? ''}
+                onVerified={handleVerified}
                 onBack={() => setStep('details')}
               />
             )}

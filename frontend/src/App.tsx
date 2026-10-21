@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { getAuthToken } from '@/api/client';
 import LoginPage from './pages/auth/LoginPage';
 import SignUpPage from './pages/auth/SignUpPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
@@ -9,6 +10,14 @@ import TransferPage from './pages/dashboard/TransferPage';
 import HistoryPage from './pages/dashboard/HistoryPage';
 import PlaceholderPage from './pages/dashboard/PlaceholderPage';
 import { AccountProvider } from './context/AccountContext';
+
+const RequireAuth = () => {
+  const location = useLocation();
+  if (!getAuthToken()) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+  return <Outlet />;
+};
 
 const AccountLayout = () => (
   <AccountProvider>
@@ -23,31 +32,33 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignUpPage />} />
 
-        <Route element={<AccountLayout />}>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/dashboard/accounts" element={<AccountsPage />} />
-          <Route path="/dashboard/deposit" element={<DepositPage />} />
-          <Route path="/dashboard/withdraw" element={<WithdrawPage />} />
-          <Route path="/dashboard/transfer" element={<TransferPage />} />
-          <Route path="/dashboard/history" element={<HistoryPage />} />
-          <Route
-            path="/dashboard/insights"
-            element={
-              <PlaceholderPage
-                title="AI Insights"
-                description="Detailed spending analysis for your accounts will appear here."
-              />
-            }
-          />
-          <Route
-            path="/dashboard/profile"
-            element={
-              <PlaceholderPage
-                title="Profile"
-                description="Manage your personal details, security, and preferences here."
-              />
-            }
-          />
+        <Route element={<RequireAuth />}>
+          <Route element={<AccountLayout />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/dashboard/accounts" element={<AccountsPage />} />
+            <Route path="/dashboard/deposit" element={<DepositPage />} />
+            <Route path="/dashboard/withdraw" element={<WithdrawPage />} />
+            <Route path="/dashboard/transfer" element={<TransferPage />} />
+            <Route path="/dashboard/history" element={<HistoryPage />} />
+            <Route
+              path="/dashboard/insights"
+              element={
+                <PlaceholderPage
+                  title="AI Insights"
+                  description="Detailed spending analysis for your accounts will appear here."
+                />
+              }
+            />
+            <Route
+              path="/dashboard/profile"
+              element={
+                <PlaceholderPage
+                  title="Profile"
+                  description=""
+                />
+              }
+            />
+          </Route>
         </Route>
 
         <Route path="/" element={<Navigate to="/login" replace />} />

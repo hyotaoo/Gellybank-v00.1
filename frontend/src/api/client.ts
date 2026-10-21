@@ -1,11 +1,16 @@
+import { demoRequest, DemoApiError } from '@/api/demo';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 const AUTH_TOKEN_KEY = 'gellybank.token';
+export const GUEST_SESSION_TOKEN = 'gellybank.guest';
 
 export const getAuthToken = (): string | null => {
   if (typeof window === 'undefined') return null;
   return window.localStorage.getItem(AUTH_TOKEN_KEY);
 };
+
+export const isGuestSession = (): boolean => getAuthToken() === GUEST_SESSION_TOKEN;
 
 export const setAuthToken = (token: string | null): void => {
   if (typeof window === 'undefined') return;
@@ -39,6 +44,17 @@ interface RequestOptions {
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, signal } = options;
 
+  if (isGuestSession()) {
+    try {
+      return demoRequest<T>(path, method, body);
+    } catch (error) {
+      if (error instanceof DemoApiError) {
+        throw new ApiError(error.message, error.status, error.code);
+      }
+      throw error;
+    }
+  }
+
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
@@ -51,6 +67,13 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
+
+  if (response.status === 401 && !path.startsWith('/auth')) {
+    setAuthToken(null);
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.assign('/login');
+    }
+  }
 
   if (!response.ok) {
     let message = `Request failed (status ${response.status}).`;

@@ -2,10 +2,9 @@ import avatar from '@/assets/avatar.png';
 import BellIcon from '@/components/icons/BellIcon';
 import CopyButton from '@/components/common/CopyButton';
 import RequestCardButton from '@/components/dashboard/RequestCardButton';
+import { isGuestSession } from '@/api/client';
 import { useAccounts } from '@/context/AccountContext';
 import { formatAccountNumber } from '@/utils/format';
-
-const USER_NAME = 'JHAMEL ROSE SUMAGUE';
 
 interface DashboardHeaderProps {
   title?: string;
@@ -13,6 +12,7 @@ interface DashboardHeaderProps {
 
 const DashboardHeader = ({ title = 'Dashboard' }: DashboardHeaderProps) => {
   const { selectedAccount } = useAccounts();
+  const displayName = isGuestSession() ? 'Guest access' : 'GellyBank customer';
   const accountNumber = selectedAccount
     ? formatAccountNumber(selectedAccount.accountNumber)
     : '—';
@@ -35,11 +35,11 @@ const DashboardHeader = ({ title = 'Dashboard' }: DashboardHeaderProps) => {
         <div className="flex items-center gap-4">
           <img
             src={avatar}
-            alt={USER_NAME}
+            alt={displayName}
             className="h-[61px] w-[61px] flex-none rounded-full border border-surface-input object-cover"
           />
           <div className="flex flex-col">
-            <span className="text-[20px] font-semibold leading-[1.21] text-ink">{USER_NAME}</span>
+            <span className="text-[20px] font-semibold leading-[1.21] text-ink">{displayName}</span>
             <div className="flex items-center gap-1.5">
               <span className="text-[14px] leading-[1.21] text-muted">
                 Account No. {accountNumber}
