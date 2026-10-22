@@ -55,6 +55,7 @@ PASSWORD_HINT = "Use letters, digits and . _ ~ ! + = , -"
 DB_SETUP_OK = 0
 DB_SETUP_FAILED = 1
 DB_SETUP_NEEDS_ADMIN = 3
+DB_SETUP_MISSING_PACKAGE = 4
 
 # MySQL errors that mean "the database or the account has to be created".
 ADMIN_ERROR_CODES = (1044, 1045, 1049, 1142, 1698)
@@ -382,15 +383,42 @@ def npm_command(*arguments: str) -> list[str]:
     return [npm, *arguments]
 
 
-def install_packages() -> bool:
+def install_packages(force: bool = False) -> bool:
     if not venv_exists():
         log_line("Create the virtual environment first.")
         return False
+    arguments = ["-m", "pip", "install", "--disable-pip-version-check"]
+    if force:
+        arguments.append("--force-reinstall")
+    arguments += ["-r", str(BACKEND_REQUIREMENTS)]
     log_line(f"Installing from {relative(BACKEND_REQUIREMENTS)} ...")
-    ok = stream_command([str(venv_python()), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(BACKEND_REQUIREMENTS)], "pip")
+    ok = stream_command([str(venv_python()), *arguments], "pip")
     if ok:
         log_line("Backend packages installed.")
     return ok
+
+
+def ensure_packages() -> bool:
+    """Make sure backend/venv holds everything the backend needs.
+
+    pymysql lives only in there, so a virtual environment that is missing it
+    breaks the database setup and the backend. A half-installed environment
+    is repaired too: pip trusts the leftover metadata and would otherwise
+    report every requirement as already satisfied.
+    """
+    if not venv_exists():
+        log_line("No virtual environment. Run option 2 first.")
+        return False
+    if packages_installed():
+        return True
+    if not install_packages():
+        return False
+    if packages_installed():
+        return True
+    log_line("Some packages are still missing. Reinstalling them ...")
+    if not install_packages(force=True):
+        return False
+    return packages_installed()
 
 
 def npm_install() -> bool:
@@ -773,6 +801,12 @@ def setup_database_child(payload: dict) -> int:
 
     Runs inside the backend virtual environment.
     """
+    try:
+        import pymysql  # noqa: F401
+    except ImportError:
+        log_line("pymysql is not installed in the backend virtual environment.")
+        return DB_SETUP_MISSING_PACKAGE
+
     host = payload.get("host", DB_HOST)
     port = int(payload.get("port", DB_PORT))
     database = payload.get("database", DB_NAME)
@@ -829,6 +863,9 @@ def run_db_helper(payload: dict) -> int:
     if not venv_exists():
         log_line("No virtual environment. Run option 2 first.")
         return DB_SETUP_FAILED
+    if not ensure_packages():
+        log_line("Could not install the backend packages.")
+        return DB_SETUP_FAILED
     command = [str(venv_python()), str(ROOT / "dev.py"), "--internal-db-setup"]
     try:
         result = subprocess.run(
@@ -848,6 +885,9 @@ def run_db_helper(payload: dict) -> int:
     for line in output.splitlines():
         if line.strip():
             log_line(line)
+    if result.returncode == DB_SETUP_MISSING_PACKAGE:
+        log_line("pymysql is missing from backend/venv. Recreate the virtual environment (option 2).")
+        return DB_SETUP_FAILED
     return result.returncode
 
 
@@ -961,6 +1001,9 @@ def start_backend() -> subprocess.Popen | None:
         return None
     if not venv_exists():
         log_line("No virtual environment. Run setup first.")
+        return None
+    if not ensure_packages():
+        log_line("Could not install the backend packages.")
         return None
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
@@ -1163,7 +1206,11 @@ def main(argv: list[str] | None = None) -> int:
         except json.JSONDecodeError:
             log_line("Bad payload")
             return DB_SETUP_FAILED
-        return setup_database_child(payload)
+        try:
+            return setup_database_child(payload)
+        except Exception as exc:
+            log_line(f"The database helper failed: {exc}")
+            return DB_SETUP_FAILED
 
     if args.setup:
         return 0 if do_setup() else 1
