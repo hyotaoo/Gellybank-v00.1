@@ -37,6 +37,9 @@ VENV = BACKEND / "venv"
 ENV_FILE = BACKEND / ".env"
 FRONTEND_ENV_FILE = FRONTEND / ".env"
 SCHEMA_FILE = BACKEND / "db" / "schema.sql"
+ADMIN_MIGRATION_FILE = BACKEND / "db" / "migrations" / "001_admin_operations.sql"
+BENEFICIARIES_MIGRATION_FILE = BACKEND / "db" / "migrations" / "002_beneficiaries.sql"
+LEGACY_COLUMNS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "003_legacy_model_columns.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 
 DB_NAME = os.environ.get("GELLYBANK_DB_NAME", "gellybank_db")
@@ -73,10 +76,37 @@ try:
     cursor = connection.cursor()
     cursor.execute("SHOW TABLES")
     tables = {row[0] for row in cursor.fetchall()}
-    connection.close()
 except Exception:
     sys.exit(4)
-sys.exit(0 if {"app_users", "bank_accounts"}.issubset(tables) else 3)
+if not {"app_users", "bank_accounts"}.issubset(tables):
+    connection.close()
+    sys.exit(3)
+try:
+    cursor.execute("SHOW COLUMNS FROM app_users")
+    user_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM audit_logs")
+    audit_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM transactions")
+    transaction_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM account_applications")
+    application_columns = {row[0] for row in cursor.fetchall()}
+except Exception:
+    connection.close()
+    sys.exit(5)
+connection.close()
+required_tables = {
+    "account_applications",
+    "password_reset_tokens",
+    "beneficiaries",
+}
+admin_schema_ready = (
+    required_tables.issubset(tables)
+    and "auth_token_version" in user_columns
+    and "severity" in audit_columns
+    and "status" in transaction_columns
+    and "created_account_id" in application_columns
+)
+sys.exit(0 if admin_schema_ready else 5)
 """
 
 
@@ -210,13 +240,17 @@ def env_written() -> bool:
 
 
 def database_ready() -> bool:
+    return database_check_code() == 0
+
+
+def database_check_code() -> int:
     url = read_env_file().get("DATABASE_URL")
     if not url or not venv_exists():
-        return False
+        return 4
     try:
         parts = parse_db_url(url)
     except ValueError:
-        return False
+        return 4
     environment = dict(os.environ)
     environment.update(
         {
@@ -235,9 +269,9 @@ def database_ready() -> bool:
             text=True,
             timeout=30,
         )
-        return result.returncode == 0
+        return result.returncode
     except (OSError, subprocess.SubprocessError):
-        return False
+        return 4
 
 
 def valid_app_password(password: str) -> bool:
@@ -309,6 +343,13 @@ def npm_version() -> str | None:
 def show_status() -> None:
     print("")
     print("  Status")
+    database_check = database_check_code()
+    if database_check == 0:
+        database_detail, database_state = f"{env_database_name()} ready", "ok"
+    elif database_check == 5:
+        database_detail, database_state = f"{env_database_name()} needs schema migration", "missing"
+    else:
+        database_detail, database_state = f"{env_database_name()} not ready", "missing"
     checks = [
         ("Python", f"{platform.python_version()} ({platform.system()})", "ok"),
         ("Node.js", node_version() or "not found", "ok" if node_version() else "missing"),
@@ -317,7 +358,7 @@ def show_status() -> None:
         ("Virtual env", relative(VENV) if venv_exists() else "not created", "ok" if venv_exists() else "missing"),
         ("Python packages", "installed" if packages_installed() else "not installed", "ok" if packages_installed() else "missing"),
         ("backend/.env", "written" if env_written() else "not written", "ok" if env_written() else "missing"),
-        ("MySQL database", f"{env_database_name()} ready" if database_ready() else f"{env_database_name()} not ready", "ok" if database_ready() else "missing"),
+        ("MySQL database", database_detail, database_state),
         ("Frontend packages", "installed" if node_modules_ready() else "not installed", "ok" if node_modules_ready() else "missing"),
     ]
     for name, detail, state in checks:
@@ -499,6 +540,159 @@ def _run_schema(connection) -> bool:
     return True
 
 
+def _migration_statement_exists(cursor, statement: str) -> bool:
+    alter = re.match(
+        r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+ADD\s+COLUMN\s+`?(\w+)`?",
+        statement,
+        re.IGNORECASE,
+    )
+    if alter:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            (alter.group(1), alter.group(2)),
+        )
+        return cursor.fetchone() is not None
+
+    constraint = re.match(
+        r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+ADD\s+CONSTRAINT\s+`?(\w+)`?",
+        statement,
+        re.IGNORECASE,
+    )
+    if constraint:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.TABLE_CONSTRAINTS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND CONSTRAINT_NAME = %s",
+            (constraint.group(1), constraint.group(2)),
+        )
+        return cursor.fetchone() is not None
+
+    create_table = re.match(
+        r"^\s*CREATE\s+TABLE\s+`?(\w+)`?",
+        statement,
+        re.IGNORECASE,
+    )
+    if create_table:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
+            (create_table.group(1),),
+        )
+        return cursor.fetchone() is not None
+
+    create_index = re.match(
+        r"^\s*CREATE\s+INDEX\s+`?(\w+)`?\s+ON\s+`?(\w+)`?",
+        statement,
+        re.IGNORECASE,
+    )
+    if create_index:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s",
+            (create_index.group(2), create_index.group(1)),
+        )
+        return cursor.fetchone() is not None
+    return False
+
+
+def _run_schema_migrations(connection) -> bool:
+    applied = 0
+    with connection.cursor() as cursor:
+        for migration_file in (
+            ADMIN_MIGRATION_FILE,
+            BENEFICIARIES_MIGRATION_FILE,
+            LEGACY_COLUMNS_MIGRATION_FILE,
+        ):
+            if not migration_file.exists():
+                log_line(f"{relative(migration_file)} is missing.")
+                return False
+            try:
+                script = migration_file.read_text(encoding="utf-8")
+            except OSError as exc:
+                log_line(f"Could not read {relative(migration_file)}: {exc}")
+                return False
+            statements = [
+                statement
+                for statement in split_sql_statements(script)
+                if not re.match(r"^\s*USE\s+", statement, re.IGNORECASE)
+            ]
+            log_line(f"Checking {relative(migration_file)} ...")
+            for number, statement in enumerate(statements, start=1):
+                if _migration_statement_exists(cursor, statement):
+                    continue
+                try:
+                    cursor.execute(statement)
+                    applied += 1
+                except Exception as exc:
+                    log_line(f"Migration statement {number} failed: {exc}")
+                    log_line("  " + " ".join(statement.split())[:300])
+                    return False
+    log_line(f"Schema migrations checked ({applied} statements applied).")
+    return True
+
+
+def _apply_schema_migrations() -> bool:
+    url = read_env_file().get("DATABASE_URL")
+    if not url:
+        log_line("No DATABASE_URL found; configure backend/.env first.")
+        return False
+    try:
+        parts = parse_db_url(url)
+    except ValueError as exc:
+        log_line(f"Could not read database configuration: {exc}")
+        return False
+    try:
+        import pymysql
+        connection = pymysql.connect(
+            host=parts["host"],
+            port=parts["port"],
+            user=parts["user"],
+            password=parts["password"],
+            database=parts["database"],
+            charset="utf8mb4",
+            connect_timeout=8,
+            autocommit=True,
+        )
+    except Exception as exc:
+        log_line(f"Could not connect to the configured database user: {exc}")
+        log_line("Apply backend/db/migrations/001_admin_operations.sql manually.")
+        return False
+    try:
+        return _run_schema_migrations(connection)
+    finally:
+        connection.close()
+
+
+def apply_schema_migrations() -> bool:
+    if not venv_exists():
+        log_line("Create and install the project virtual environment first.")
+        return False
+    if Path(sys.executable).resolve() == venv_python().resolve():
+        return _apply_schema_migrations()
+
+    command = [
+        str(venv_python()),
+        str(ROOT / "dev.py"),
+        "--internal-schema-migration",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log_line(f"Could not run schema migrations: {exc}")
+        return False
+    if result.stdout.strip():
+        log_line(result.stdout.strip())
+    if result.stderr.strip():
+        log_line(result.stderr.strip())
+    return result.returncode == 0
+
+
 def _setup_database(admin_user: str, admin_password: str, app_password: str) -> bool:
     import pymysql
     log_line(f"Signing in to MySQL as '{admin_user}' ...")
@@ -543,6 +737,8 @@ def _setup_database(admin_user: str, admin_password: str, app_password: str) -> 
 
 
 def setup_database() -> bool:
+    if database_check_code() == 5:
+        return apply_schema_migrations()
     if not env_written():
         print()
         while True:
@@ -617,7 +813,7 @@ def start_backend() -> subprocess.Popen | None:
 
 def start_frontend() -> subprocess.Popen | None:
     if port_in_use(FRONTEND_PORT):
-        status, _ = http_get(f"http://127.0.0.1:{FRONTEND_PORT}/", 1.5)
+        status, _ = http_get(f"http://localhost:{FRONTEND_PORT}/", 1.5)
         if status == 200:
             log_line(f"Frontend already running on http://localhost:{FRONTEND_PORT}")
             return None
@@ -634,7 +830,10 @@ def start_frontend() -> subprocess.Popen | None:
     log_line(f"Starting frontend on http://localhost:{FRONTEND_PORT} ...")
     try:
         process = subprocess.Popen(
-            npm_command("run", "dev", "--", "--port", str(FRONTEND_PORT), "--strictPort"),
+            npm_command(
+                "run", "dev", "--", "--host", "127.0.0.1",
+                "--port", str(FRONTEND_PORT), "--strictPort",
+            ),
             cwd=str(FRONTEND), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1, **spawn_options(),
         )
@@ -692,6 +891,8 @@ def wait_for(
         if process is not None and process.poll() is not None:
             return False
         status, _ = http_get(url, 1.0)
+        if status != 200 and "127.0.0.1" in url:
+            status, _ = http_get(url.replace("127.0.0.1", "localhost"), 1.0)
         if status == 200:
             return True
         time.sleep(0.3)
@@ -760,9 +961,16 @@ def do_setup() -> bool:
         if not write_env(app_password):
             return False
         write_frontend_env()
-    if not database_ready():
+    database_check = database_check_code()
+    if database_check == 5:
+        if not apply_schema_migrations():
+            return False
+    elif database_check != 0:
         if not setup_database():
             return False
+    if not database_ready():
+        log_line("Database setup finished, but the required schema is still not ready.")
+        return False
     if not node_modules_ready():
         if not npm_install():
             return False
@@ -825,6 +1033,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start", action="store_true", help="set up if needed, start servers, then exit")
     parser.add_argument("--version", action="version", version="Gellybank dev tool 1.1.0")
     parser.add_argument("--internal-db-setup", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--internal-schema-migration", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     if args.internal_db_setup:
@@ -834,6 +1043,9 @@ def main(argv: list[str] | None = None) -> int:
             log_line("Bad payload")
             return 1
         return 0 if _setup_database(payload.get("admin_user", DB_ADMIN_USER), payload.get("admin_password", ""), payload.get("app_password", "")) else 1
+
+    if args.internal_schema_migration:
+        return 0 if _apply_schema_migrations() else 1
 
     if args.setup:
         return 0 if do_setup() else 1

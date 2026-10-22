@@ -195,6 +195,7 @@ CREATE TABLE transactions (
     reference_code VARCHAR(40) NOT NULL UNIQUE,
     description VARCHAR(255) NULL,
     performed_by_user_id BIGINT UNSIGNED NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_transactions_account
@@ -261,7 +262,30 @@ CREATE INDEX idx_cards_account_status
 
 
 -- ============================================================
--- TABLE 8: AUDIT LOGS
+-- TABLE 8: BENEFICIARIES
+-- ============================================================
+
+CREATE TABLE beneficiaries (
+    beneficiary_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_id BIGINT UNSIGNED NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    account_number VARCHAR(30) NOT NULL,
+    bank VARCHAR(100) NULL,
+    created_at DATETIME NULL,
+
+    CONSTRAINT fk_beneficiaries_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES customers(customer_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_beneficiaries_customer
+    ON beneficiaries(customer_id);
+
+
+-- ============================================================
+-- TABLE 9: AUDIT LOGS
 -- ============================================================
 
 CREATE TABLE audit_logs (
@@ -290,7 +314,7 @@ CREATE INDEX idx_audit_entity
 
 
 -- ============================================================
--- TABLE 9: ACCOUNT APPLICATIONS
+-- TABLE 10: ACCOUNT APPLICATIONS
 -- ============================================================
 
 CREATE TABLE account_applications (
@@ -329,7 +353,7 @@ CREATE INDEX idx_application_status_date
 
 
 -- ============================================================
--- TABLE 10: PASSWORD RESET TOKENS
+-- TABLE 11: PASSWORD RESET TOKENS
 -- ============================================================
 
 CREATE TABLE password_reset_tokens (

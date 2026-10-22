@@ -16,6 +16,8 @@ creating the database, filling in `.env`, and starting the server.
 | `app_detailed.py` | The same code with heavy explanatory comments |
 | `db/schema.sql` | Fresh-install MySQL schema, including admin operations tables |
 | `db/migrations/001_admin_operations.sql` | One-time update for databases created from the earlier schema |
+| `db/migrations/002_beneficiaries.sql` | Adds the beneficiaries table used by the API |
+| `db/migrations/003_legacy_model_columns.sql` | Adds columns expected by the current transaction/application models |
 | `create_admin.py` | Interactive bootstrap for the first admin login |
 | `.env` | Your MySQL credentials and secret key. `python dev.py` writes it. Git ignores it |
 | `requirements.txt` | The Python packages the app needs |
@@ -24,9 +26,9 @@ creating the database, filling in `.env`, and starting the server.
 Two things worth knowing before you read the code:
 
 - **The app never creates tables itself.** Run `db/schema.sql` for a fresh
-  database. For an existing database, apply
-  `db/migrations/001_admin_operations.sql` exactly once before deploying the
-  new backend.
+  database. For an existing database not using `dev.py`, apply the required
+  migration files in numeric order before starting the app. The developer
+  tool detects and applies missing objects from those migrations.
 - **Create an administrator after schema setup.** Run
   `venv/bin/python create_admin.py` (or the Windows venv equivalent) from this
   directory. The password is prompted interactively and is not echoed.

@@ -44,7 +44,7 @@ class DevToolTests(unittest.TestCase):
         with patch.object(dev, "port_in_use", return_value=False), patch.object(
             dev.shutil, "which", return_value="/usr/bin/npm"
         ), patch.object(dev, "node_modules_ready", return_value=True), patch.object(
-            dev, "npm_command", return_value=["npm", "run", "dev"]
+            dev, "npm_command", side_effect=lambda *args: ["npm", *args]
         ), patch.object(dev, "BACKEND_PORT", 5401), patch.object(
             dev.subprocess, "Popen", return_value=process
         ) as popen, patch.object(dev, "pump_output"):
@@ -54,6 +54,8 @@ class DevToolTests(unittest.TestCase):
             popen.call_args.kwargs["env"]["VITE_API_BASE_URL"],
             "http://127.0.0.1:5401/api",
         )
+        self.assertIn("--host", popen.call_args.args[0])
+        self.assertIn("127.0.0.1", popen.call_args.args[0])
 
     def test_backend_uses_runner_port(self):
         process = Mock()
@@ -83,6 +85,63 @@ class DevToolTests(unittest.TestCase):
         self.assertIs(dev.PROCESSES["backend"], backend_process)
         self.assertNotIn("frontend", dev.PROCESSES)
         stop_process.assert_called_once_with(frontend_process)
+
+    def test_migration_skips_existing_database_objects(self):
+        cursor = Mock()
+        cursor.fetchone.return_value = (1,)
+
+        self.assertTrue(
+            dev._migration_statement_exists(
+                cursor,
+                "ALTER TABLE app_users ADD COLUMN auth_token_version INT NOT NULL",
+            )
+        )
+        cursor.execute.assert_called_once_with(
+            "SELECT 1 FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            ("app_users", "auth_token_version"),
+        )
+
+    def test_migration_skips_existing_foreign_key_constraints(self):
+        cursor = Mock()
+        cursor.fetchone.return_value = (1,)
+
+        self.assertTrue(
+            dev._migration_statement_exists(
+                cursor,
+                "ALTER TABLE account_applications "
+                "ADD CONSTRAINT fk_application_created_account "
+                "FOREIGN KEY (created_account_id) REFERENCES bank_accounts(account_id)",
+            )
+        )
+        cursor.execute.assert_called_once_with(
+            "SELECT 1 FROM information_schema.TABLE_CONSTRAINTS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND CONSTRAINT_NAME = %s",
+            ("account_applications", "fk_application_created_account"),
+        )
+
+    def test_migration_uses_project_virtualenv_from_system_python(self):
+        completed = Mock(returncode=0, stdout="migration done", stderr="")
+        with patch.object(dev, "venv_exists", return_value=True), patch.object(
+            dev, "venv_python", return_value=Path("/project/backend/venv/bin/python")
+        ), patch.object(dev.sys, "executable", "/usr/bin/python3"), patch.object(
+            dev.subprocess, "run", return_value=completed
+        ) as run:
+            self.assertTrue(dev.apply_schema_migrations())
+
+        self.assertEqual(run.call_args.args[0][-1], "--internal-schema-migration")
+
+    def test_wait_for_falls_back_to_localhost_for_ipv4_url(self):
+        with patch.object(dev.time, "monotonic", side_effect=[0.0, 0.1]), patch.object(
+            dev, "http_get", side_effect=[(None, "unreachable"), (200, "")]
+        ) as get:
+            self.assertTrue(
+                dev.wait_for("http://127.0.0.1:5173/", timeout=1.0)
+            )
+        self.assertEqual(
+            [call.args[0] for call in get.call_args_list],
+            ["http://127.0.0.1:5173/", "http://localhost:5173/"],
+        )
 
 
 if __name__ == "__main__":

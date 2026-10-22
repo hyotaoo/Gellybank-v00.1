@@ -23,6 +23,9 @@ python dev.py
 Choose **1** to install missing dependencies and configure the application,
 then choose **6** to start the backend and frontend. Setup creates or updates
 the configured MySQL database account and applies `backend/db/schema.sql`.
+If an existing database is detected with an earlier schema, setup applies the
+needed additive migrations and verifies the tables and columns before starting
+the backend.
 The runner reports each server's health; if one fails, any healthy server
 remains running.
 
@@ -60,10 +63,10 @@ It comes with a savings account (₱25,000) and a checking account (₱8,500).
 
 ## Admin portal
 
-For an existing database, apply `backend/db/migrations/001_admin_operations.sql`
-once after the original schema. A fresh database created from
-`backend/db/schema.sql` already includes these tables and columns; do not run
-the migration on top of that schema.
+For an existing database, the `dev.py` setup detects and applies the required
+migrations in order, including `backend/db/migrations/001_admin_operations.sql`
+`002_beneficiaries.sql`, and `003_legacy_model_columns.sql`. A fresh database
+created from `backend/db/schema.sql` already includes these tables and columns.
 
 Create the first administrator interactively after the database is ready:
 
