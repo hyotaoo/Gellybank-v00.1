@@ -86,14 +86,14 @@ const OpenAccountForm = () => {
     setMessage(undefined);
 
     try {
-      const account = await createAccount({
+      const application = await createAccount({
         type,
         label: label.trim() || undefined,
         initialDeposit: initialDeposit ? parsedDeposit : undefined,
         isPrimary: makePrimary || undefined,
       });
       setStatus('success');
-      setMessage(`${account.label} opened successfully.`);
+      setMessage(`${application.label} application submitted for review.`);
       setLabel('');
       setInitialDeposit('');
       setMakePrimary(false);
@@ -192,7 +192,7 @@ const OpenAccountForm = () => {
           className="h-[48px] gap-2 px-6 text-[15px] font-semibold"
         >
           <PlusIcon className="h-5 w-5" />
-          {status === 'loading' ? 'Opening…' : 'Open account'}
+          {status === 'loading' ? 'Submitting…' : 'Submit application'}
         </Button>
         {message && (
           <span

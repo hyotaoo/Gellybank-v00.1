@@ -18,22 +18,23 @@ read your statement.
 
 | Area | Status |
 | --- | --- |
-| Backend API | ✅ All 20 endpoints implemented |
-| Database | ✅ 8-table schema + demo seed |
-| Backend auth | ⚠️ Works, but `current_user()` falls back to the demo customer |
-| Frontend auth | ❌ `api/auth.ts` is never imported — the login form does not call the server, the token is never stored, and there is no route guard |
-| Accounts | ✅ List / create / close are wired up. ⚠️ "Set as primary" is a no-op |
+| Backend API | ✅ Banking and admin operations endpoints implemented |
+| Database | ✅ Schema includes admin user controls, account applications, password resets, and audit severity |
+| Backend auth | ✅ Protected APIs require valid active-user tokens; admin APIs require `ADMIN` |
+| Frontend auth | ✅ Customer and admin sign-in use the API and persist bearer tokens |
+| Accounts | ✅ List / close are wired up; new account requests now enter the admin approval queue |
 | Transactions | ✅ Deposit, withdraw, transfer, and statement history are wired up |
+| Admin operations | ✅ Overview, user controls, application decisions, and read-only audit logs |
 | Beneficiaries | ⚠️ Read-only in the UI — there is no screen to add, edit, or delete one |
 | Cards | ⚠️ Request only — there is no screen to list or block a card |
 | Insights | ⚠️ The backend endpoint works, but the page is a placeholder and nothing calls it |
-| Tests | ❌ None |
-| Migrations | ❌ None — the schema is a hand-run SQL file |
+| Tests | ✅ Focused admin/auth backend tests |
+| Migrations | ⚠️ SQL remains hand-run; `db/migrations/001_admin_operations.sql` upgrades existing databases |
 
-The shortest true summary: **the banking features work, but the login does
-not.** Every screen you see is loaded as the demo customer, because the
-backend quietly substitutes that customer whenever a request arrives without
-a valid token. Section 7 has the details; section 8 has the fix.
+The demo account is still seeded for development, but invalid or missing bearer
+tokens no longer select it for authenticated API routes. Admin access is
+restricted to active `ADMIN` users and financial transaction creation is
+explicitly denied to that role.
 
 ---
 
@@ -51,7 +52,8 @@ Browser (React app)  ──HTTP/JSON──>  Flask API  ──SQLAlchemy──> 
 - The **backend is the source of truth**. All money rules live there.
 - The user proves who they are with a **bearer token** sent on every request.
 - The token is a signed payload from `itsdangerous` (which ships with Flask),
-  not a JWT. It expires after 24 hours.
+  not a JWT. It expires after 24 hours and is invalidated when a password is
+  reset.
 
 ---
 
@@ -86,8 +88,9 @@ There is no test framework, no linter, and no CI in either half of the project.
 
 ## 4. Data model
 
-Nine tables, defined in `backend/db/schema.sql` and mirrored by the
-SQLAlchemy models in `backend/app.py`.
+The original banking tables plus `account_applications` and
+`password_reset_tokens` are defined in `backend/db/schema.sql` and mirrored by
+the SQLAlchemy models in `backend/app.py`.
 
 | Table | Model | What it holds |
 | --- | --- | --- |
@@ -99,7 +102,9 @@ SQLAlchemy models in `backend/app.py`.
 | `transactions` | `Transaction` | Every movement on one account, with the balance left afterwards and a `status` of `PENDING` / `COMPLETED` / `FAILED` / `VOID` |
 | `bank_cards` | `BankCard` | A card issued against an account. Only the last 4 digits are stored |
 | `beneficiaries` | `Beneficiary` | Saved transfer recipients (name, account number, bank) |
-| `audit_logs` | *none yet* | An audit trail: who did what, to which record, and from where. The table exists but nothing writes to it — see issue 13 |
+| `account_applications` | `AccountApplication` | Customer account requests, pending review and approval/rejection history |
+| `password_reset_tokens` | `PasswordResetToken` | Hashed, single-use, expiring password reset tokens |
+| `audit_logs` | `AuditLog` | Append-only application events with actor, severity, entity, details, and IP |
 
 The schema also creates two views that the backend does not read, but that
 are useful for reporting: `v_account_summary` (an account with its owner's
@@ -118,18 +123,19 @@ database is named `gellybank_db`; the app connects to it as the MySQL user
 All routes live in `backend/app.py`. Responses are JSON. Errors come back as
 `{"message": "...", "code": "..."}` with a matching HTTP status.
 
-The **Auth** column says whether the route *should* require a token. Today
-every route marked "Yes" also accepts a request with no token — it just falls
-back to the demo customer. See section 7, item 1.
+Banking data routes require a valid active-user bearer token. Every
+`/api/admin/*` route additionally requires role `ADMIN`; authorization is
+enforced by Flask decorators, not just by the frontend.
 
 | Method | Path | Auth | Called by the UI? |
 | --- | --- | --- | --- |
 | `GET` | `/` | No | — (startup message) |
 | `GET` | `/api/health` | No | — (health check) |
-| `POST` | `/api/auth/register` | No | ❌ `api/auth.ts` is never imported |
-| `POST` | `/api/auth/login` | No | ❌ same |
+| `POST` | `/api/auth/register` | No | ⚠️ Signup UI remains a prototype |
+| `POST` | `/api/auth/login` | No | ✅ Customer and admin login |
+| `POST` | `/api/auth/reset-password` | No | ✅ Consumes one-use reset token |
 | `GET` | `/api/accounts` | Yes | ✅ `AccountContext` |
-| `POST` | `/api/accounts` | Yes | ✅ `OpenAccountForm` |
+| `POST` | `/api/accounts` | Yes | ✅ Creates a pending application for customers |
 | `GET` | `/api/accounts/<id>` | Yes | ❌ `getAccount` is unused |
 | `PATCH` | `/api/accounts/<id>` | Yes | ⚠️ `AccountsPage` calls it, but the backend ignores the body |
 | `DELETE` | `/api/accounts/<id>` | Yes | ✅ `AccountsPage` (closes the account) |
@@ -144,12 +150,26 @@ back to the demo customer. See section 7, item 1.
 | `DELETE` | `/api/beneficiaries/<id>` | Yes | ❌ unused |
 | `POST` | `/api/cards/request` | Yes | ✅ `RequestCardButton` |
 | `GET` | `/api/insights/spending` | Yes | ❌ unused |
+| `GET` | `/api/admin/dashboard` | Admin | ✅ Admin overview |
+| `GET` | `/api/admin/users` | Admin | ✅ Search system users |
+| `PATCH` | `/api/admin/users/<id>` | Admin | ✅ Change role or active status |
+| `POST` | `/api/admin/users/<id>/password-reset` | Admin | ✅ Issue one-use reset link |
+| `GET` | `/api/admin/applications` | Admin | ✅ List application queue |
+| `POST` | `/api/admin/applications/<id>/decision` | Admin | ✅ Approve or reject with reason |
+| `GET` | `/api/admin/logs` | Admin | ✅ Filter read-only audit events |
 
 ### Frontend routes
 
 | Path | Screen | Notes |
 | --- | --- | --- |
-| `/login` | `LoginPage` | Does not call the API — it navigates straight to the dashboard |
+| `/` | `LoginPage` | Welcome screen |
+| `/login` | `SignInPage` | Customer sign-in |
+| `/admin/login` | `AdminLoginPage` | Figma Admin Sign In; accepts only administrators |
+| `/admin/dashboard` | `AdminDashboardPage` | System metrics and quick actions |
+| `/admin/users` | `AdminUsersPage` | Role/status management and password reset links |
+| `/admin/applications` | `AdminApplicationsPage` | Approve/reject account requests |
+| `/admin/logs` | `AdminLogsPage` | Searchable severity/actor-filtered audit events |
+| `/reset-password` | `ResetPasswordPage` | Redeem one-time password reset link |
 | `/signup` | `SignUpPage` | Steps: details → OTP → success. The OTP screen is cosmetic; no code is sent or checked |
 | `/dashboard` | `DashboardPage` | Balance, quick actions, AI Insights card |
 | `/dashboard/accounts` | `AccountsPage` | Open / close / set-primary |
@@ -160,8 +180,10 @@ back to the demo customer. See section 7, item 1.
 | `/dashboard/insights` | `PlaceholderPage` | Not built yet |
 | `/dashboard/profile` | `PlaceholderPage` | Not built yet |
 
-**None of the dashboard routes are protected.** There is no route guard, so
-anyone who types `/dashboard` gets in.
+The admin frontend route is guarded by a protected metrics request, and every
+admin API route checks the bearer token and exact admin role. Customer page
+routes still have no frontend route guard, but their banking API requests
+require a valid token.
 
 ---
 
@@ -176,7 +198,7 @@ If you ever need to set it up by hand (for debugging or an unusual environment):
 ```powershell
 # 1. create the database
 #    run backend/db/schema.sql in MySQL Workbench or the mysql client
-#    (it creates gellybank_db - 9 tables, 2 views, 2 account types)
+#    (it creates gellybank_db and the initial schema)
 
 # 2. create the MySQL account the app uses, as an admin
 #    CREATE USER 'gellyca'@'localhost' IDENTIFIED BY 'your-password';
@@ -205,28 +227,29 @@ The backend seeds a demo customer on first start, but only if the database is
 empty: `demo@gellybank.com` / `demo12345`, with a savings account of ₱25,000
 and a checking account of ₱8,500.
 
+For existing databases, apply `backend/db/migrations/001_admin_operations.sql`
+once instead of re-running the schema. Create the first admin interactively
+with `cd backend && venv/bin/python create_admin.py`.
+
 ---
 
 ## 7. Known issues
 
-Listed most important first. Each one is a real, observable problem in the
-code as it stands.
+The first authentication and admin-audit findings below are resolved. Remaining
+issues are still observable in the current code.
 
-1. **Anyone can read anyone's data.** `backend/app.py:113-124` — when a
-   request has no token, or an invalid one, `current_user()` returns the demo
-   customer instead of `None`. Every endpoint therefore answers as
-   `demo@gellybank.com`. This is the single biggest problem in the project.
+1. **Resolved — missing/invalid tokens no longer select the demo user.**
+   Authenticated banking routes now return 401 without a valid active-user
+   token. Admin routes require an active `ADMIN` token and return 403 for
+   other roles.
 
-2. **The frontend never logs in.** `frontend/src/api/auth.ts` exports `login()`
-   and `register()`, but nothing imports that file.
-   `frontend/src/components/auth/LoginForm.tsx:20-22` submits and calls
-   `navigate('/dashboard')` without ever touching the API. `setAuthToken()` is
-   only ever called with `null` (sign-out), so no token is ever stored, and
-   `frontend/src/api/client.ts:45` therefore never attaches an
-   `Authorization` header.
+2. **Partially resolved — customer/admin sign-in uses the API.** The signup
+   flow remains a prototype and does not yet create users through
+   `/api/auth/register`.
 
-3. **No route guard.** `frontend/src/App.tsx` mounts `/dashboard/*` with no
-   check. Combined with issue 1, the whole app is open.
+3. **Partially resolved — admin routes are guarded.** Customer dashboard routes
+   still lack a client-side route guard; their API data requests now require
+   bearer authentication.
 
 4. **CORS is wide open.** `backend/app.py:39` calls `CORS(app)` with no origin
    list, so any site in a browser can call this API.
@@ -263,20 +286,20 @@ code as it stands.
     `db/schema.sql`, `backend/README.md`, `app_detailed.py`, and `dev.py` are
     all untracked. A fresh clone of the repository cannot be installed or run.
 
-11. **No tests, no linter, no CI.** The deposit, withdraw, and transfer logic
-    is exactly the code that needs a test suite, and there is none.
+11. **Limited tests, no linter, no CI.** Focused admin/auth backend tests cover
+    role boundaries, applications, password resets, and audit events. Existing
+    deposit, withdrawal, transfer, and broader frontend behavior still need
+    dedicated test coverage.
 
 12. **macOS note for the setup script.** `cryptography==50.0.2` only ships
     prebuilt wheels for Apple Silicon, so an Intel Mac would try to compile it
     from source. Separately, macOS Monterey and later use port 5000 for
     AirPlay Receiver, which collides with the Flask dev server.
 
-13. **The `audit_logs` table is never written to.** It is defined in
-    `backend/db/schema.sql` with the right columns — actor, action, entity,
-    details, IP address — but there is no `AuditLog` model in
-    `backend/app.py` and no code path that inserts a row. Every login,
-    deposit, withdrawal, transfer, and account change happens without a
-    trace. For a banking app this is the second-biggest gap after issue 1.
+13. **Partially resolved — admin and authentication events are audited.**
+    Role/status changes, account-application decisions, password reset events,
+    failed logins, and login spikes are recorded. Customer deposits,
+    withdrawals, and transfers are not yet included in the audit trail.
 
 14. **`SECRET_KEY` falls back to a hardcoded value.** `backend/app.py:19` uses
     `os.environ.get("SECRET_KEY", "dev-secret-change-me")`, and that fallback
