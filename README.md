@@ -21,8 +21,8 @@ python dev.py
 ```
 
 The tool checks your machine, sets up what is missing (a virtual environment,
-the Python packages, `backend/.env`, the MySQL database and the `gellyca`
-account, and the frontend packages), starts the backend and the frontend, and
+the Python packages, `backend/.env`, the MySQL database (as `root`), and the
+frontend packages), starts the backend and the frontend, and
 opens a small dashboard. The first run takes a few minutes; after that it opens
 straight up.
 

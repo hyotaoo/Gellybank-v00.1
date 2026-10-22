@@ -23,10 +23,14 @@ Two things worth knowing before you read the code:
 
 - **The app never creates tables itself.** It reads the ones defined in
   `db/schema.sql`, so run that file against MySQL before the first start.
-  The file is safe to run more than once — it skips anything already there.
-- **The database is `gellybank_db`, and the app connects as `gellyca`.** That
-  MySQL account has rights inside that one database and nowhere else, so it
-  cannot read or change anything else on the server.
+  The file is safe to run more than once: tables use `CREATE TABLE IF NOT
+  EXISTS`, the seed rows use `INSERT IGNORE`, the indexes live inside the
+  table definitions, and the views are replaced. Nothing is ever dropped or
+  rewritten. `python dev.py` (option 4) applies it and then checks the
+  database against the models in `app.py`.
+- **The database is `gellybank_db`, and the app connects as `root`.** Root is
+  already the MySQL superuser, so `dev.py` does not create or alter the account
+  — it only makes sure the database exists and grants access to it.
 - **The password lives only in `.env`.** It is never written into the code, so
   it cannot be committed by accident.
 

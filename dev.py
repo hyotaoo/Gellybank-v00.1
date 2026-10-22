@@ -39,7 +39,7 @@ SCHEMA_FILE = BACKEND / "db" / "schema.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 
 DB_NAME = os.environ.get("GELLYBANK_DB_NAME", "gellybank_db")
-DB_USER = os.environ.get("GELLYBANK_DB_USER", "gellyca")
+DB_USER = os.environ.get("GELLYBANK_DB_USER", "root")
 DB_HOST = os.environ.get("GELLYBANK_DB_HOST", "127.0.0.1")
 DB_PORT = int(os.environ.get("GELLYBANK_DB_PORT", "3306"))
 DB_ADMIN_USER = os.environ.get("GELLYBANK_DB_ADMIN_USER", "root")
@@ -262,7 +262,7 @@ def write_env(app_password: str) -> bool:
     url = f"mysql+pymysql://{DB_USER}:{app_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     content = (
         "# Written by dev.py.\n"
-        f"# The MySQL account '{DB_USER}' only has access to the {DB_NAME} database.\n"
+        f"# The app connects to MySQL as '{DB_USER}' ({DB_NAME} database).\n"
         "# SECRET_KEY signs the login tokens. Keep this file private.\n"
         f"DATABASE_URL={url}\n"
         f"SECRET_KEY={secret_key}\n"
@@ -662,6 +662,7 @@ def create_database_and_user(payload: dict) -> bool:
         return False
     try:
         patterns = ["localhost"] if host == "localhost" else ["localhost", host]
+        is_root = user.lower() == "root"
         with admin.cursor() as cursor:
             log_line(f"Creating database '{database}' ...")
             cursor.execute(
@@ -669,11 +670,14 @@ def create_database_and_user(payload: dict) -> bool:
                 "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
             )
             for pattern in patterns:
-                log_line(f"Creating MySQL user '{user}'@'{pattern}' ...")
-                cursor.execute(
-                    f"CREATE USER IF NOT EXISTS '{user}'@'{pattern}' IDENTIFIED BY {quote_sql(password)}"
-                )
-                cursor.execute(f"ALTER USER '{user}'@'{pattern}' IDENTIFIED BY {quote_sql(password)}")
+                if is_root:
+                    log_line(f"Ensuring privileges for '{user}'@'{pattern}' ...")
+                else:
+                    log_line(f"Creating MySQL user '{user}'@'{pattern}' ...")
+                    cursor.execute(
+                        f"CREATE USER IF NOT EXISTS '{user}'@'{pattern}' IDENTIFIED BY {quote_sql(password)}"
+                    )
+                    cursor.execute(f"ALTER USER '{user}'@'{pattern}' IDENTIFIED BY {quote_sql(password)}")
                 cursor.execute(f"GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}'@'{pattern}'")
             cursor.execute("FLUSH PRIVILEGES")
         log_line("MySQL account ready.")
@@ -820,6 +824,14 @@ def setup_database_child(payload: dict) -> int:
     connection, code, message = db_connect(host, port, user, password, database)
     if connection is None:
         log_line(f"Could not connect to MySQL as '{user}': {message}")
+        if user.lower() == "root" and code in (1045, 1698):
+            log_line(
+                "The root password in backend/.env does not match this MySQL server."
+            )
+            log_line(
+                "Edit backend/.env (or delete it and run setup again) with the real root password."
+            )
+            return DB_SETUP_FAILED
         if code in ADMIN_ERROR_CODES:
             log_line("The account or the database does not exist yet.")
             return DB_SETUP_NEEDS_ADMIN
