@@ -11,7 +11,8 @@ import vector4 from '@/assets/login/vector-4.svg';
 const LoginPage = () => (
   <main className="h-[100dvh] w-full overflow-hidden bg-brand-gradient font-sans text-ink">
     <section className="relative hidden h-full overflow-hidden lg:block" aria-label="Welcome to GellyBank">
-      <div className="absolute -top-24 left-[calc(50%-800px)] h-[1024px] w-[1440px] bg-brand-gradient">
+      {/* Canvas is 1440px wide, so left = 50% - 720px keeps it centered in the viewport */}
+      <div className="absolute -top-24 left-[calc(50%-720px)] h-[1024px] w-[1440px] bg-brand-gradient">
         <img src={brandDecorationCircle} className="pointer-events-none absolute -right-[69px] -top-[52px]" width="427" height="390" alt="" />
         <img src={brandDecorationCircle} className="pointer-events-none absolute -bottom-[195px] -left-[65px]" width="427" height="390" alt="" />
 
@@ -50,7 +51,7 @@ const LoginPage = () => (
         </Link>
         <p className="text-[16px] font-medium leading-none">Already have an account? <Link to="/login" className="text-primary-hover">Sign In</Link></p>
       </div>
-      <img src={object} className="pointer-events-none absolute -bottom-40 w-[440px] opacity-90" alt="" />
+      <img src={object} className="pointer-events-none absolute -bottom-40 left-1/2 w-[440px] -translate-x-1/2 opacity-90" alt="" />
     </section>
   </main>
 );

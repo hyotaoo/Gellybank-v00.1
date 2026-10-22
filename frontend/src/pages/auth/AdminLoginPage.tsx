@@ -17,7 +17,7 @@ const AdminLoginPage = () => {
 
   return (
     <main className="h-[100dvh] w-full overflow-hidden bg-brand-gradient font-sans text-ink">
-      <div className="relative mx-auto flex h-full w-full max-w-[1440px] items-center px-5 py-5 sm:px-10 lg:px-0">
+      <div className="relative mx-auto flex h-full w-full max-w-[1440px] flex-col items-center justify-center gap-8 px-5 py-5 sm:px-10 lg:flex-row lg:gap-12 lg:px-12">
         <div
           aria-hidden="true"
           className="absolute inset-y-0 left-0 hidden w-[829px] bg-[#d9d9d9]/20 min-[1440px]:block"
@@ -40,8 +40,17 @@ const AdminLoginPage = () => {
           alt=""
         />
 
+        {/* Title: top on mobile, right side on desktop */}
+        <div className="relative z-10 w-full text-center text-[44px] font-black leading-[1.2] text-white sm:text-[56px] lg:order-2 lg:w-auto lg:flex-1 lg:text-[64px]">
+          <p>
+            Gelly<span className="text-brand-accent">Bank</span>
+          </p>
+          <p>Admin Portal</p>
+        </div>
+
+        {/* Form: below title on mobile, left side on desktop */}
         <form
-          className="relative z-10 flex w-full max-w-[623px] flex-col justify-between gap-4 rounded-[36px] bg-surface-card px-6 py-8 sm:px-[54px] sm:py-[35px] min-[1440px]:absolute min-[1440px]:left-[103px] min-[1440px]:top-[335px] min-[1440px]:min-h-[352px]"
+          className="relative z-10 flex w-full max-w-[623px] flex-col justify-between gap-4 rounded-[36px] bg-surface-card px-6 py-8 sm:px-[54px] sm:py-[35px] lg:order-1 lg:flex-1 min-[1440px]:min-h-[352px]"
           onSubmit={async (event: FormEvent<HTMLFormElement>) => {
             event.preventDefault();
             setSubmitting(true);
@@ -121,13 +130,6 @@ const AdminLoginPage = () => {
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
-
-        <div className="absolute left-[880px] top-[423px] hidden w-[497px] text-[64px] font-black leading-[77px] text-white min-[1440px]:block">
-          <p>
-            Gelly<span className="text-brand-accent">Bank</span>
-          </p>
-          <p>Admin Portal</p>
-        </div>
       </div>
     </main>
   );
