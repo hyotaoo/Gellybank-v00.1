@@ -35,8 +35,8 @@ const BrandPanel = () => {
   const accentVisible = ACCENT_TEXT.slice(0, Math.max(0, count - WHITE_TEXT.length));
 
   return (
-    <section className="relative z-10 flex w-[686px] flex-none flex-col gap-10 pb-[72px] pl-[72px] pr-6 pt-[120px]">
-      <h1 className="relative max-w-[590px] text-[96px] font-black leading-none text-white">
+    <section className="relative z-10 flex h-full w-full flex-col justify-center gap-6 px-5 py-6 sm:px-10 lg:w-[686px] lg:px-[72px] lg:py-10">
+      <h1 className="relative max-w-[590px] text-[52px] font-black leading-none text-white sm:text-[64px] lg:text-[72px] 2xl:text-[96px]">
         <span aria-hidden="true" className="invisible">
           {WHITE_TEXT}
           <span className="text-brand-accent">{ACCENT_TEXT}</span>
@@ -49,7 +49,7 @@ const BrandPanel = () => {
         <span className="sr-only">{FULL_TEXT}</span>
       </h1>
 
-      <p className="text-[20px] font-normal leading-[1.21] text-ink">
+      <p className="text-[18px] font-normal leading-[1.21] text-ink lg:text-[20px]">
         Banking doesn’t have to be stressful.
       </p>
 

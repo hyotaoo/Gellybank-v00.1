@@ -31,14 +31,14 @@ const Sidebar = () => {
   };
 
   return (
-    <aside className="relative z-10 flex h-full w-[363px] flex-none flex-col bg-white shadow-[4px_0_20px_1px_rgba(0,0,0,0.05)]">
-      <div className="px-[18px] pt-[80px]">
+    <aside className="relative z-10 flex w-full flex-none flex-col bg-white shadow-[4px_0_20px_1px_rgba(0,0,0,0.05)] lg:h-full lg:w-[363px]">
+      <div className="px-4 pt-5 lg:px-[18px] lg:pt-[80px]">
         <h1 className="text-[32px] font-bold leading-none tracking-[-0.02em] text-ink">
           Gelly<span className="text-primary">Bank!</span>
         </h1>
       </div>
 
-      <nav aria-label="Primary" className="flex flex-col gap-1 overflow-y-auto px-4 pt-[32px]">
+      <nav aria-label="Primary" className="flex gap-1 overflow-x-auto px-4 py-4 lg:flex-col lg:overflow-y-auto lg:pt-[32px]">
         {navItems.map((item) => (
           <SidebarNavItem
             key={item.label}
@@ -50,7 +50,7 @@ const Sidebar = () => {
         ))}
       </nav>
 
-      <div className="mt-auto border-t-2 border-surface-line px-4 py-6">
+      <div className="border-t-2 border-surface-line px-4 py-3 lg:mt-auto lg:py-6">
         <button
           type="button"
           onClick={handleSignOut}

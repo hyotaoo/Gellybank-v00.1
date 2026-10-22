@@ -16,7 +16,7 @@ const LoginForm = () => {
 
   return (
     <form
-      className="flex w-full flex-col gap-4 rounded-[36px] bg-surface-card px-[54px] py-[35px]"
+      className="flex w-full flex-col gap-4 rounded-[36px] bg-surface-card px-6 py-8 sm:px-[54px] sm:py-[35px]"
       onSubmit={(event) => {
         event.preventDefault();
         navigate('/dashboard');

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import LoginPage from './pages/auth/LoginPage';
+import TellerLoginPage from './pages/auth/TellerLoginPage';
 import SignUpPage from './pages/auth/SignUpPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
 import AccountsPage from './pages/dashboard/AccountsPage';
@@ -21,6 +22,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/teller/login" element={<TellerLoginPage />} />
         <Route path="/signup" element={<SignUpPage />} />
 
         <Route element={<AccountLayout />}>

@@ -14,11 +14,11 @@ const FALLING_COINS = [
 ] as const;
 
 const LoginIllustration = () => (
-  <section className="relative flex flex-1">
+  <section className="absolute inset-y-0 right-0 hidden w-[754px] overflow-hidden lg:block">
     <img
       src={gellyObject}
       alt="GellyBank login illustration"
-      className="absolute left-[67px] top-[449px] h-[507px] w-[491px] max-w-none"
+      className="absolute bottom-[-34px] left-[90px] h-[460px] w-[446px] max-w-none xl:bottom-[-12px] xl:left-[67px] xl:h-[507px] xl:w-[491px]"
     />
 
     {FALLING_COINS.map((c) => (

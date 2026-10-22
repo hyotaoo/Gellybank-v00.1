@@ -13,7 +13,7 @@ const SidebarNavItem = ({ icon, label, to, end = false }: SidebarNavItemProps) =
     to={to}
     end={end}
     className={({ isActive }) =>
-      `relative flex h-[56px] items-center gap-5 overflow-hidden rounded-[16px] pl-5 pr-5 text-[20px] leading-[1.21] transition-colors ${
+      `relative flex h-[48px] shrink-0 items-center gap-3 overflow-hidden rounded-[16px] px-4 text-[16px] leading-[1.21] transition-colors lg:h-[56px] lg:gap-5 lg:pl-5 lg:pr-5 lg:text-[20px] ${
         isActive ? 'bg-surface-card text-primary' : 'text-ink hover:bg-surface-card/60'
       }`
     }
