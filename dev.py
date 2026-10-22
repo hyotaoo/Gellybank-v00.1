@@ -48,7 +48,16 @@ BACKEND_PORT = int(os.environ.get("GELLYBANK_BACKEND_PORT", "5000"))
 FRONTEND_PORT = int(os.environ.get("GELLYBANK_FRONTEND_PORT", "5173"))
 
 REQUIRED_MODULES = ("flask", "flask_cors", "flask_sqlalchemy", "pymysql", "dotenv")
-PASSWORD_PATTERN = re.compile(r"^[A-Za-z0-9._~!#%+=,-]{8,64}$")
+PASSWORD_PATTERN = re.compile(r"^[A-Za-z0-9._~!+=,-]{8,64}$")
+PASSWORD_HINT = "Use letters, digits and . _ ~ ! + = , -"
+
+# Exit codes used by the database helper that runs inside the virtual env.
+DB_SETUP_OK = 0
+DB_SETUP_FAILED = 1
+DB_SETUP_NEEDS_ADMIN = 3
+
+# MySQL errors that mean "the database or the account has to be created".
+ADMIN_ERROR_CODES = (1044, 1045, 1049, 1142, 1698)
 
 PROCESSES: dict[str, subprocess.Popen] = {}
 LOG_LOCK = threading.Lock()
@@ -452,19 +461,204 @@ def quote_sql(value: str) -> str:
     return f"'{escaped}'"
 
 
-def _connect_app(app_password: str):
+# ----------------------------------------------------------------------
+# Schema helpers
+#
+# The functions below only read and parse files, so they work in any
+# interpreter. The MySQL helpers further down are only ever called inside
+# the backend virtual environment, because pymysql is installed there and
+# nowhere else.
+# ----------------------------------------------------------------------
+
+
+def split_table_body(body: str) -> list[str]:
+    """Split a CREATE TABLE body on the commas that separate its parts."""
+    parts: list[str] = []
+    buffer: list[str] = []
+    depth = 0
+    in_single = in_double = in_backtick = False
+    for char in body:
+        if char == "'" and not in_double and not in_backtick:
+            in_single = not in_single
+        elif char == '"' and not in_single and not in_backtick:
+            in_double = not in_double
+        elif char == "`" and not in_single and not in_double:
+            in_backtick = not in_backtick
+        if not in_single and not in_double and not in_backtick:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "," and depth == 0:
+                parts.append("".join(buffer))
+                buffer = []
+                continue
+        buffer.append(char)
+    parts.append("".join(buffer))
+    return parts
+
+
+def parse_index_definition(part: str) -> dict | None:
+    """Read a KEY / UNIQUE / CONSTRAINT part of a table definition."""
+    match = re.match(
+        r"^(?:CONSTRAINT\s+`?([A-Za-z0-9_]+)`?\s+)?"
+        r"(UNIQUE(?:\s+(?:KEY|INDEX))?|KEY|INDEX)\s*"
+        r"(?:`?([A-Za-z0-9_]+)`?\s*)?\(([^)]*)\)",
+        part,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    constraint, kind, index_name, columns = match.groups()
+    name = index_name or constraint
+    if not name:
+        return None
+    unique = kind.upper().startswith("UNIQUE")
+    column_list = " ".join(columns.split())
+    keyword = "UNIQUE KEY" if unique else "KEY"
+    return {
+        "name": name,
+        "unique": unique,
+        "columns": [column.strip().strip("`") for column in column_list.split(",")],
+        "ddl": f"{keyword} `{name}` ({column_list})",
+    }
+
+
+def schema_definitions() -> list[dict]:
+    """Describe every table in backend/db/schema.sql.
+
+    Each entry holds the table name, its columns (name plus the DDL that
+    defines them) and its indexes, so a database can be brought in line with
+    the file without dropping anything that already exists.
+    """
+    if not SCHEMA_FILE.exists():
+        return []
+    try:
+        script = SCHEMA_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    definitions: list[dict] = []
+    pattern = re.compile(
+        r"^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?\s*\((.*)\)"
+        r"\s*(?:ENGINE|DEFAULT|CHARSET|COLLATE|AUTO_INCREMENT|ROW_FORMAT|COMMENT|$)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    for statement in split_sql_statements(script):
+        match = pattern.match(statement.strip())
+        if not match:
+            continue
+        columns: list[tuple[str, str]] = []
+        indexes: list[dict] = []
+        for part in split_table_body(match.group(2)):
+            part = " ".join(part.split())
+            if not part:
+                continue
+            head = part.split(None, 1)[0].upper()
+            if head in ("PRIMARY", "UNIQUE", "KEY", "INDEX", "CONSTRAINT", "FOREIGN", "CHECK"):
+                index = parse_index_definition(part)
+                if index:
+                    indexes.append(index)
+                continue
+            name, _, ddl = part.partition(" ")
+            columns.append((name.strip("`"), ddl.strip()))
+            if re.search(r"\bUNIQUE\b", ddl, re.IGNORECASE) and "PRIMARY KEY" not in ddl.upper():
+                columns_name = name.strip("`")
+                indexes.append({
+                    "name": columns_name,
+                    "unique": True,
+                    "columns": [columns_name],
+                    "ddl": f"UNIQUE KEY `{columns_name}` (`{columns_name}`)",
+                })
+        definitions.append({"name": match.group(1), "columns": columns, "indexes": indexes})
+    return definitions
+
+
+def app_requirements() -> dict[str, set[str]]:
+    """Tables and columns that backend/app.py expects the database to have."""
+    app_file = BACKEND / "app.py"
+    if not app_file.exists():
+        return {}
+    try:
+        text = app_file.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    requirements: dict[str, set[str]] = {}
+    pattern = re.compile(r"^class\s+\w+\(db\.Model\):(.*?)(?=^class\s|\Z)", re.MULTILINE | re.DOTALL)
+    for match in pattern.finditer(text):
+        body = match.group(1)
+        table = re.search(r"__tablename__\s*=\s*[\"']([A-Za-z0-9_]+)[\"']", body)
+        if not table:
+            continue
+        columns = set(re.findall(r"^\s{4}([A-Za-z0-9_]+)\s*=\s*db\.Column", body, re.MULTILINE))
+        requirements[table.group(1)] = columns
+    return requirements
+
+
+# ----------------------------------------------------------------------
+# MySQL helpers
+#
+# pymysql only exists inside backend/venv, so every step that talks to
+# MySQL runs in a child interpreter started from that virtual environment.
+# ----------------------------------------------------------------------
+
+
+def db_connect(host: str, port: int, user: str, password: str, database: str | None = None):
+    """Open a MySQL connection. Returns (connection, error code, message)."""
     import pymysql
+
     try:
         connection = pymysql.connect(
-            host=DB_HOST, port=DB_PORT, user=DB_USER, password=app_password,
-            database=DB_NAME, charset="utf8mb4", connect_timeout=8, autocommit=True,
+            host=host, port=port, user=user, password=password, database=database,
+            charset="utf8mb4", connect_timeout=8, autocommit=True,
         )
     except Exception as exc:
-        return None, str(exc)
-    return connection, ""
+        code = exc.args[0] if exc.args and isinstance(exc.args[0], int) else 0
+        return None, code, str(exc)
+    return connection, 0, ""
 
 
-def _run_schema(connection) -> bool:
+def create_database_and_user(payload: dict) -> bool:
+    """Create the database and the app account. Needs admin rights."""
+    admin_user = payload.get("admin_user", DB_ADMIN_USER)
+    admin_password = payload.get("admin_password", "")
+    host = payload.get("host", DB_HOST)
+    port = int(payload.get("port", DB_PORT))
+    database = payload.get("database", DB_NAME)
+    user = payload.get("user", DB_USER)
+    password = payload.get("password", "")
+
+    log_line(f"Signing in to MySQL as '{admin_user}' ...")
+    admin, _, message = db_connect(host, port, admin_user, admin_password)
+    if admin is None:
+        log_line(f"Could not sign in to MySQL as '{admin_user}': {message}")
+        return False
+    try:
+        patterns = ["localhost"] if host == "localhost" else ["localhost", host]
+        with admin.cursor() as cursor:
+            log_line(f"Creating database '{database}' ...")
+            cursor.execute(
+                f"CREATE DATABASE IF NOT EXISTS `{database}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
+            for pattern in patterns:
+                log_line(f"Creating MySQL user '{user}'@'{pattern}' ...")
+                cursor.execute(
+                    f"CREATE USER IF NOT EXISTS '{user}'@'{pattern}' IDENTIFIED BY {quote_sql(password)}"
+                )
+                cursor.execute(f"ALTER USER '{user}'@'{pattern}' IDENTIFIED BY {quote_sql(password)}")
+                cursor.execute(f"GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}'@'{pattern}'")
+            cursor.execute("FLUSH PRIVILEGES")
+        log_line("MySQL account ready.")
+        return True
+    except Exception as exc:
+        log_line(f"MySQL setup failed: {exc}")
+        return False
+    finally:
+        admin.close()
+
+
+def apply_schema(connection) -> bool:
+    """Run backend/db/schema.sql. The file is written to be re-runnable."""
     if not SCHEMA_FILE.exists():
         log_line(f"{relative(SCHEMA_FILE)} is missing.")
         return False
@@ -473,95 +667,267 @@ def _run_schema(connection) -> bool:
     except OSError as exc:
         log_line(f"Could not read {relative(SCHEMA_FILE)}: {exc}")
         return False
-    applied = []
-    for statement in split_sql_statements(script):
-        if re.match(r"^\s*CREATE\s+DATABASE", statement, re.IGNORECASE):
-            continue
-        if re.match(r"^\s*USE\s+", statement, re.IGNORECASE):
-            continue
-        applied.append(statement)
-    log_line(f"Applying {relative(SCHEMA_FILE)} ({len(applied)} statements) ...")
-    try:
-        with connection.cursor() as cursor:
-            for number, statement in enumerate(applied, start=1):
-                try:
-                    cursor.execute(statement)
-                except Exception as exc:
-                    log_line(f"Statement {number} failed: {exc}")
-                    log_line("  " + " ".join(statement.split())[:300])
-                    return False
-    except Exception as exc:
-        log_line(f"Could not apply the schema: {exc}")
+    statements = [
+        statement for statement in split_sql_statements(script)
+        if not re.match(r"^\s*(CREATE\s+DATABASE|USE\s+)", statement, re.IGNORECASE)
+    ]
+    failures = 0
+    with connection.cursor() as cursor:
+        for number, statement in enumerate(statements, start=1):
+            try:
+                cursor.execute(statement)
+            except Exception as exc:
+                failures += 1
+                log_line(f"Statement {number} failed: {exc}")
+                log_line("  " + " ".join(statement.split())[:300])
+    if failures:
+        log_line(f"{failures} statement(s) in {relative(SCHEMA_FILE)} failed.")
         return False
-    log_line("Schema applied.")
+    log_line(f"Applied {relative(SCHEMA_FILE)} ({len(statements)} statements).")
     return True
 
 
-def _setup_database(admin_user: str, admin_password: str, app_password: str) -> bool:
-    import pymysql
-    log_line(f"Signing in to MySQL as '{admin_user}' ...")
+def reconcile_schema(connection) -> tuple[list[str], list[str]]:
+    """Add the columns and indexes the schema declares but the database lacks.
+
+    Nothing is dropped or changed, so this is safe to run at any time.
+    """
+    changes: list[str] = []
+    problems: list[str] = []
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+        )
+        tables = {row[0] for row in cursor.fetchall()}
+        for definition in schema_definitions():
+            name = definition["name"]
+            if name not in tables:
+                problems.append(f"table '{name}' is missing")
+                continue
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() AND table_name = %s",
+                (name,),
+            )
+            columns = {row[0] for row in cursor.fetchall()}
+            for column, ddl in definition["columns"]:
+                if column in columns:
+                    continue
+                try:
+                    cursor.execute(f"ALTER TABLE `{name}` ADD COLUMN `{column}` {ddl}")
+                except Exception as exc:
+                    problems.append(f"could not add column {name}.{column}: {exc}")
+                    continue
+                columns.add(column)
+                changes.append(f"column {name}.{column}")
+            cursor.execute(
+                "SELECT index_name, column_name FROM information_schema.statistics "
+                "WHERE table_schema = DATABASE() AND table_name = %s",
+                (name,),
+            )
+            indexes: dict[str, list[str]] = {}
+            for index_name, column_name in cursor.fetchall():
+                indexes.setdefault(index_name, []).append(column_name)
+            covered = {tuple(entry) for entry in indexes.values()}
+            for index in definition["indexes"]:
+                if index["name"] in indexes or tuple(index["columns"]) in covered:
+                    continue
+                try:
+                    cursor.execute(f"ALTER TABLE `{name}` ADD {index['ddl']}")
+                except Exception as exc:
+                    problems.append(f"could not add index {index['name']} on {name}: {exc}")
+                    continue
+                changes.append(f"index {index['name']} on {name}")
+    return changes, problems
+
+
+def verify_requirements(connection) -> tuple[list[str], list[str]]:
+    """Check the database against what backend/app.py needs."""
+    requirements = app_requirements()
+    missing_tables: list[str] = []
+    missing_columns: list[str] = []
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()"
+        )
+        tables = {row[0] for row in cursor.fetchall()}
+        for table, columns in requirements.items():
+            if table not in tables:
+                missing_tables.append(table)
+                continue
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() AND table_name = %s",
+                (table,),
+            )
+            live = {row[0] for row in cursor.fetchall()}
+            for column in sorted(columns):
+                if column not in live:
+                    missing_columns.append(f"{table}.{column}")
+    return missing_tables, missing_columns
+
+
+def setup_database_child(payload: dict) -> int:
+    """Create the database if needed and apply the schema.
+
+    Runs inside the backend virtual environment.
+    """
+    host = payload.get("host", DB_HOST)
+    port = int(payload.get("port", DB_PORT))
+    database = payload.get("database", DB_NAME)
+    user = payload.get("user", DB_USER)
+    password = payload.get("password", "")
+
+    if payload.get("mode") == "admin":
+        if not create_database_and_user(payload):
+            return DB_SETUP_FAILED
+
+    connection, code, message = db_connect(host, port, user, password, database)
+    if connection is None:
+        log_line(f"Could not connect to MySQL as '{user}': {message}")
+        if code in ADMIN_ERROR_CODES:
+            log_line("The account or the database does not exist yet.")
+            return DB_SETUP_NEEDS_ADMIN
+        log_line("Check that MySQL is running and that backend/.env holds the right details.")
+        return DB_SETUP_FAILED
+
     try:
-        admin = pymysql.connect(host=DB_HOST, port=DB_PORT, user=admin_user, password=admin_password, charset="utf8mb4", connect_timeout=8, autocommit=True)
-    except Exception as exc:
-        log_line(f"Could not sign in to MySQL as '{admin_user}': {exc}")
-        log_line("Create the database manually in MySQL Workbench and run backend/db/schema.sql.")
-        return False
-    try:
-        with admin.cursor() as cursor:
-            log_line(f"Creating database '{DB_NAME}' ...")
-            cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-            log_line(f"Creating MySQL user '{DB_USER}' ...")
-            cursor.execute(f"CREATE USER IF NOT EXISTS '{DB_USER}'@'localhost' IDENTIFIED BY {quote_sql(app_password)}")
-            cursor.execute(f"ALTER USER '{DB_USER}'@'localhost' IDENTIFIED BY {quote_sql(app_password)}")
-            cursor.execute(f"GRANT ALL PRIVILEGES ON `{DB_NAME}`.* TO '{DB_USER}'@'localhost'")
-            cursor.execute("FLUSH PRIVILEGES")
-        log_line("MySQL account ready.")
-        connection, error = _connect_app(app_password)
-        if connection is None:
-            log_line(f"Couldn't connect as '{DB_USER}'@'localhost': {error}")
-            log_line(f"Adding '{DB_USER}'@'{DB_HOST}' ...")
-            with admin.cursor() as cursor:
-                cursor.execute(f"CREATE USER IF NOT EXISTS '{DB_USER}'@'{DB_HOST}' IDENTIFIED BY {quote_sql(app_password)}")
-                cursor.execute(f"ALTER USER '{DB_USER}'@'{DB_HOST}' IDENTIFIED BY {quote_sql(app_password)}")
-                cursor.execute(f"GRANT ALL PRIVILEGES ON `{DB_NAME}`.* TO '{DB_USER}'@'{DB_HOST}'")
-                cursor.execute("FLUSH PRIVILEGES")
-            connection, error = _connect_app(app_password)
-            if connection is None:
-                log_line(f"Still couldn't connect: {error}")
-                return False
-        try:
-            return _run_schema(connection)
-        finally:
-            connection.close()
-    except Exception as exc:
-        log_line(f"MySQL setup failed: {exc}")
-        return False
+        if not apply_schema(connection):
+            return DB_SETUP_FAILED
+        changes, problems = reconcile_schema(connection)
+        for change in changes:
+            log_line(f"Added missing {change}.")
+        for problem in problems:
+            log_line(f"Warning: {problem}.")
+        missing_tables, missing_columns = verify_requirements(connection)
+        for table in missing_tables:
+            log_line(f"Warning: table '{table}' required by backend/app.py is missing.")
+        for column in missing_columns:
+            log_line(f"Warning: column '{column}' required by backend/app.py is missing.")
+        if missing_tables or missing_columns:
+            return DB_SETUP_FAILED
+        requirements = app_requirements()
+        column_count = sum(len(columns) for columns in requirements.values())
+        log_line(
+            f"Checked {len(requirements)} tables and {column_count} columns "
+            "from backend/app.py: all present."
+        )
+        log_line(f"Database '{database}' is ready.")
+        return DB_SETUP_OK
     finally:
-        admin.close()
+        connection.close()
+
+
+def run_db_helper(payload: dict) -> int:
+    """Run the database helper under the backend virtual environment.
+
+    pymysql is only installed in backend/venv, so the work has to happen
+    there. The payload goes over stdin, which keeps the passwords out of
+    the process list.
+    """
+    if not venv_exists():
+        log_line("No virtual environment. Run option 2 first.")
+        return DB_SETUP_FAILED
+    command = [str(venv_python()), str(ROOT / "dev.py"), "--internal-db-setup"]
+    try:
+        result = subprocess.run(
+            command,
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        log_line("The database helper took too long and was stopped.")
+        return DB_SETUP_FAILED
+    except (OSError, subprocess.SubprocessError) as exc:
+        log_line(f"Could not run the database helper: {exc}")
+        return DB_SETUP_FAILED
+    output = (result.stdout or "") + (result.stderr or "")
+    for line in output.splitlines():
+        if line.strip():
+            log_line(line)
+    return result.returncode
+
+
+def prompt_password(prompt: str) -> str:
+    """Ask for a password without echoing it.
+
+    Falls back to reading a plain line when stdin is not a terminal: on
+    Windows getpass reads straight from the console, so it would wait
+    forever when the tool is driven from a pipe.
+    """
+    try:
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    if interactive:
+        return getpass.getpass(prompt)
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    try:
+        return sys.stdin.readline().rstrip("\r\n")
+    except Exception:
+        return ""
 
 
 def setup_database() -> bool:
     if not env_written():
         print()
         while True:
-            app_password = getpass.getpass(f"Password for MySQL user '{DB_USER}' (8-64 chars): ")
+            app_password = prompt_password(f"Password for MySQL user '{DB_USER}' (8-64 chars): ")
             if valid_app_password(app_password):
                 break
-            print("Invalid password. Use letters, digits and . _ ~ ! # % + = , -")
+            print(f"Invalid password. {PASSWORD_HINT}")
         if not write_env(app_password):
             return False
         write_frontend_env()
-    else:
-        env_data = read_env_file()
-        try:
-            app_password = parse_db_url(env_data["DATABASE_URL"])["password"]
-        except Exception:
-            app_password = ""
+
+    values = read_env_file()
+    try:
+        parts = parse_db_url(values["DATABASE_URL"])
+    except Exception:
+        parts = {
+            "user": DB_USER, "password": "", "host": DB_HOST,
+            "port": DB_PORT, "database": DB_NAME,
+        }
+
+    payload = {
+        "mode": "app",
+        "user": parts["user"],
+        "password": parts["password"],
+        "host": parts["host"],
+        "port": parts["port"],
+        "database": parts["database"],
+    }
     print()
-    print("MySQL admin credentials (used once, not saved):")
+    code = run_db_helper(payload)
+    if code == DB_SETUP_OK:
+        return True
+    if code != DB_SETUP_NEEDS_ADMIN:
+        print("Database setup failed. See the messages above.")
+        return False
+
+    print()
+    print("MySQL admin credentials are only needed when the database or the account")
+    print(f"'{parts['user']}' does not exist yet. They are used once and never saved.")
+    print("Press Enter to skip this step and set the database up by hand.")
     admin_user = input(f"  Admin user [{DB_ADMIN_USER}]: ").strip() or DB_ADMIN_USER
-    admin_password = getpass.getpass("  Admin password: ")
-    return _setup_database(admin_user, admin_password, app_password)
+    admin_password = prompt_password("  Admin password: ")
+    if not admin_password:
+        print()
+        print("Skipping the admin step. To finish by hand:")
+        print("  1. Create the database and the account in MySQL Workbench:")
+        print(f"       CREATE DATABASE {parts['database']} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+        print(f"       CREATE USER '{parts['user']}'@'localhost' IDENTIFIED BY '<the password in backend/.env>';")
+        print(f"       GRANT ALL PRIVILEGES ON {parts['database']}.* TO '{parts['user']}'@'localhost';")
+        print("       FLUSH PRIVILEGES;")
+        print(f"  2. Run {relative(SCHEMA_FILE)} (it is safe to run more than once).")
+        print("  3. Run this tool again.")
+        return False
+    payload.update({"mode": "admin", "admin_user": admin_user, "admin_password": admin_password})
+    return run_db_helper(payload) == DB_SETUP_OK
 
 
 def spawn_options() -> dict:
@@ -717,10 +1083,10 @@ def do_setup() -> bool:
     if not env_written():
         print()
         while True:
-            app_password = getpass.getpass(f"Password for MySQL user '{DB_USER}' (8-64 chars): ")
+            app_password = prompt_password(f"Password for MySQL user '{DB_USER}' (8-64 chars): ")
             if valid_app_password(app_password):
                 break
-            print("Invalid password. Use letters, digits and . _ ~ ! # % + = , -")
+            print(f"Invalid password. {PASSWORD_HINT}")
         if not write_env(app_password):
             return False
         write_frontend_env()
@@ -796,8 +1162,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = json.loads(sys.stdin.read() or "{}")
         except json.JSONDecodeError:
             log_line("Bad payload")
-            return 1
-        return 0 if _setup_database(payload.get("admin_user", DB_ADMIN_USER), payload.get("admin_password", ""), payload.get("app_password", "")) else 1
+            return DB_SETUP_FAILED
+        return setup_database_child(payload)
 
     if args.setup:
         return 0 if do_setup() else 1
