@@ -1,6 +1,15 @@
 -- ============================================================
 -- GELLY BANK DATABASE
 -- ============================================================
+-- This file is safe to run more than once:
+--   * tables are created with IF NOT EXISTS
+--   * indexes live inside the table definitions, so they are
+--     created with the table and never collide on a re-run
+--   * seed rows are inserted with INSERT IGNORE
+--   * views are refreshed with CREATE OR REPLACE VIEW
+-- Nothing that already exists is dropped or rewritten.
+--
+-- To start from scratch, uncomment the line below.
 -- DROP DATABASE IF EXISTS gellybank_db;
 
 CREATE DATABASE IF NOT EXISTS gellybank_db
@@ -14,7 +23,7 @@ USE gellybank_db;
 -- TABLE 1: CUSTOMERS
 -- ============================================================
 
-CREATE TABLE customers (
+CREATE TABLE IF NOT EXISTS customers (
     customer_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(50) NOT NULL,
     middle_name VARCHAR(50) NULL,
@@ -37,7 +46,7 @@ CREATE TABLE customers (
 -- TABLE 2: APP_USERS
 -- ============================================================
 
-CREATE TABLE app_users (
+CREATE TABLE IF NOT EXISTS app_users (
     user_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     customer_id BIGINT UNSIGNED NULL,
     username VARCHAR(50) NOT NULL UNIQUE,
@@ -52,9 +61,11 @@ CREATE TABLE app_users (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
+    KEY idx_app_users_role_active (role, is_active),
+
     CONSTRAINT uq_app_users_customer
         UNIQUE (customer_id),
-        
+
     CONSTRAINT fk_app_users_customer
         FOREIGN KEY (customer_id)
         REFERENCES customers(customer_id)
@@ -62,15 +73,12 @@ CREATE TABLE app_users (
         ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE INDEX idx_app_users_role_active
-    ON app_users(role, is_active);
-
 
 -- ============================================================
 -- TABLE 3: ACCOUNT TYPES
 -- ============================================================
 
-CREATE TABLE account_types (
+CREATE TABLE IF NOT EXISTS account_types (
     account_type_id SMALLINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     type_name VARCHAR(30) NOT NULL UNIQUE,
     description VARCHAR(255) NULL,
@@ -80,7 +88,7 @@ CREATE TABLE account_types (
 ) ENGINE=InnoDB;
 
 -- Initial account types
-INSERT INTO account_types (type_name, description, minimum_balance, default_interest_rate)
+INSERT IGNORE INTO account_types (type_name, description, minimum_balance, default_interest_rate)
 VALUES
 ('SAVINGS', 'Savings account for deposits and withdrawals', 100.00, 0.00),
 ('CHECKING', 'Checking account for everyday transactions', 500.00, 0.00);
@@ -90,7 +98,7 @@ VALUES
 -- TABLE 4: BANK ACCOUNTS
 -- ============================================================
 
-CREATE TABLE bank_accounts (
+CREATE TABLE IF NOT EXISTS bank_accounts (
     account_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     customer_id BIGINT UNSIGNED NOT NULL,
     account_type_id SMALLINT UNSIGNED NOT NULL,
@@ -102,9 +110,12 @@ CREATE TABLE bank_accounts (
         NOT NULL DEFAULT 'ACTIVE',
 
     opened_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    closed_at TIMESTAMP NULL,
+    closed_at DATETIME NULL,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
+
+    KEY idx_accounts_customer (customer_id),
+    KEY idx_accounts_customer_status (customer_id, status),
 
     CONSTRAINT fk_accounts_customer
         FOREIGN KEY (customer_id)
@@ -119,18 +130,12 @@ CREATE TABLE bank_accounts (
         ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE INDEX idx_accounts_customer
-    ON bank_accounts(customer_id);
-
-CREATE INDEX idx_accounts_customer_status
-    ON bank_accounts(customer_id, status);
-
 
 -- ============================================================
 -- TABLE 5: TRANSFERS
 -- ============================================================
 
-CREATE TABLE transfers (
+CREATE TABLE IF NOT EXISTS transfers (
     transfer_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     reference_code VARCHAR(40) NOT NULL UNIQUE,
     from_account_id BIGINT UNSIGNED NOT NULL,
@@ -143,7 +148,11 @@ CREATE TABLE transfers (
     initiated_by_user_id BIGINT UNSIGNED NULL,
     description VARCHAR(255) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP NULL,
+    completed_at DATETIME NULL,
+
+    KEY idx_transfers_from_date (from_account_id, created_at),
+    KEY idx_transfers_to_date (to_account_id, created_at),
+    KEY idx_transfers_status_date (status, created_at),
 
     CONSTRAINT fk_transfers_from_account
         FOREIGN KEY (from_account_id)
@@ -164,21 +173,12 @@ CREATE TABLE transfers (
         ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE INDEX idx_transfers_from_date
-    ON transfers(from_account_id, created_at);
-
-CREATE INDEX idx_transfers_to_date
-    ON transfers(to_account_id, created_at);
-
-CREATE INDEX idx_transfers_status_date
-    ON transfers(status, created_at);
-
 
 -- ============================================================
 -- TABLE 6: TRANSACTIONS
 -- ============================================================
 
-CREATE TABLE transactions (
+CREATE TABLE IF NOT EXISTS transactions (
     transaction_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     account_id BIGINT UNSIGNED NOT NULL,
     transfer_id BIGINT UNSIGNED NULL,
@@ -194,7 +194,15 @@ CREATE TABLE transactions (
     reference_code VARCHAR(40) NOT NULL UNIQUE,
     description VARCHAR(255) NULL,
     performed_by_user_id BIGINT UNSIGNED NULL,
+
+    status ENUM('PENDING', 'COMPLETED', 'FAILED', 'VOID')
+        NOT NULL DEFAULT 'COMPLETED',
+
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    KEY idx_transactions_account_date (account_id, created_at),
+    KEY idx_transactions_type_date (transaction_type, created_at),
+    KEY idx_transactions_transfer (transfer_id),
 
     CONSTRAINT fk_transactions_account
         FOREIGN KEY (account_id)
@@ -215,21 +223,12 @@ CREATE TABLE transactions (
         ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE INDEX idx_transactions_account_date
-    ON transactions(account_id, created_at);
-
-CREATE INDEX idx_transactions_type_date
-    ON transactions(transaction_type, created_at);
-
-CREATE INDEX idx_transactions_transfer
-    ON transactions(transfer_id);
-
 
 -- ============================================================
 -- TABLE 7: BANK CARDS
 -- ============================================================
 
-CREATE TABLE bank_cards (
+CREATE TABLE IF NOT EXISTS bank_cards (
     card_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     account_id BIGINT UNSIGNED NOT NULL,
 
@@ -248,6 +247,8 @@ CREATE TABLE bank_cards (
     blocked_at DATETIME NULL,
     cancelled_at DATETIME NULL,
 
+    KEY idx_cards_account_status (account_id, status),
+
     CONSTRAINT fk_cards_account
         FOREIGN KEY (account_id)
         REFERENCES bank_accounts(account_id)
@@ -255,15 +256,34 @@ CREATE TABLE bank_cards (
         ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE INDEX idx_cards_account_status
-    ON bank_cards(account_id, status);
+
+-- ============================================================
+-- TABLE 8: BENEFICIARIES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS beneficiaries (
+    beneficiary_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_id BIGINT UNSIGNED NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    account_number VARCHAR(30) NOT NULL,
+    bank VARCHAR(100) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    KEY idx_beneficiaries_customer (customer_id),
+
+    CONSTRAINT fk_beneficiaries_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES customers(customer_id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB;
 
 
 -- ============================================================
--- TABLE 8: AUDIT LOGS
+-- TABLE 9: AUDIT LOGS
 -- ============================================================
 
-CREATE TABLE audit_logs (
+CREATE TABLE IF NOT EXISTS audit_logs (
     audit_log_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     actor_user_id BIGINT UNSIGNED NULL,
     action VARCHAR(100) NOT NULL,
@@ -273,18 +293,15 @@ CREATE TABLE audit_logs (
     ip_address VARCHAR(45) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
+    KEY idx_audit_actor_date (actor_user_id, created_at),
+    KEY idx_audit_entity (entity_type, entity_id),
+
     CONSTRAINT fk_audit_actor
         FOREIGN KEY (actor_user_id)
         REFERENCES app_users(user_id)
         ON DELETE SET NULL
         ON UPDATE CASCADE
 ) ENGINE=InnoDB;
-
-CREATE INDEX idx_audit_actor_date
-    ON audit_logs(actor_user_id, created_at);
-
-CREATE INDEX idx_audit_entity
-    ON audit_logs(entity_type, entity_id);
 
 
 -- ============================================================
@@ -337,5 +354,3 @@ SELECT
 FROM transactions AS t
 JOIN bank_accounts AS a
     ON a.account_id = t.account_id;
-    
-    
