@@ -14,32 +14,39 @@ Tailwind on the frontend.
 
 ## Quick start
 
-From the root of the repo, run a single command:
+From the root of the repo, run the interactive terminal menu:
 
 ```powershell
 python dev.py
 ```
 
-The tool checks your machine, sets up what is missing (a virtual environment,
-the Python packages, `backend/.env`, the MySQL database and the `gellyca`
-account, and the frontend packages), starts the backend and the frontend, and
-opens a small dashboard. The first run takes a few minutes; after that it opens
-straight up.
+Choose **1** to install missing dependencies and configure the application,
+then choose **6** to start the backend and frontend. Setup creates or updates
+the configured MySQL database account and applies `backend/db/schema.sql`.
+The runner reports each server's health; if one fails, any healthy server
+remains running.
+
+To perform setup without opening the menu:
+
+```sh
+python dev.py --setup
+```
+
+To set up if needed and run both servers in the foreground:
+
+```sh
+python dev.py --start
+```
+
+Press Ctrl+C to stop servers started by the tool. Backend and frontend ports
+default to 5000 and 5173 and can be changed with `GELLYBANK_BACKEND_PORT` and
+`GELLYBANK_FRONTEND_PORT`.
 
 - Backend: http://localhost:5000 — check `GET /api/health`
 - Frontend: http://localhost:5173
 
-To open the dashboard without starting the servers, run:
-
-```powershell
-python dev.py --menu
-```
-
-If the dashboard cannot load for some reason, there is a plain text menu:
-
-```powershell
-python dev.py --plain
-```
+Run `python dev.py` to open the text menu without automatically starting the
+servers.
 
 ## Demo account
 

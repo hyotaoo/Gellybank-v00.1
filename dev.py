@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 import urllib.error
+from urllib.parse import quote, unquote
 import urllib.request
 from pathlib import Path
 
@@ -182,7 +183,7 @@ def parse_db_url(url: str) -> dict:
     parts = match.groupdict()
     return {
         "user": parts["user"],
-        "password": parts["password"],
+        "password": unquote(parts["password"]),
         "host": parts["host"],
         "port": int(parts["port"] or 3306),
         "database": parts["database"],
@@ -249,7 +250,8 @@ def generate_app_password() -> str:
 
 def write_env(app_password: str) -> bool:
     secret_key = secrets.token_urlsafe(48)
-    url = f"mysql+pymysql://{DB_USER}:{app_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    encoded_password = quote(app_password, safe="")
+    url = f"mysql+pymysql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     content = (
         "# Written by dev.py.\n"
         f"# The MySQL account '{DB_USER}' only has access to the {DB_NAME} database.\n"
@@ -269,7 +271,7 @@ def write_env(app_password: str) -> bool:
 def write_frontend_env() -> bool:
     if FRONTEND_ENV_FILE.exists():
         return False
-    content = f"VITE_API_BASE_URL=http://localhost:{BACKEND_PORT}/api\n"
+    content = f"VITE_API_BASE_URL=http://127.0.0.1:{BACKEND_PORT}/api\n"
     try:
         FRONTEND_ENV_FILE.write_text(content, encoding="utf-8")
         log_line(f"Wrote {relative(FRONTEND_ENV_FILE)}")
@@ -598,6 +600,7 @@ def start_backend() -> subprocess.Popen | None:
         return None
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
+    env["GELLYBANK_BACKEND_PORT"] = str(BACKEND_PORT)
     log_line(f"Starting backend on http://localhost:{BACKEND_PORT} ...")
     try:
         process = subprocess.Popen(
@@ -614,6 +617,10 @@ def start_backend() -> subprocess.Popen | None:
 
 def start_frontend() -> subprocess.Popen | None:
     if port_in_use(FRONTEND_PORT):
+        status, _ = http_get(f"http://127.0.0.1:{FRONTEND_PORT}/", 1.5)
+        if status == 200:
+            log_line(f"Frontend already running on http://localhost:{FRONTEND_PORT}")
+            return None
         log_line(f"Port {FRONTEND_PORT} is in use by another process.")
         return None
     if not shutil.which("npm"):
@@ -623,7 +630,7 @@ def start_frontend() -> subprocess.Popen | None:
         log_line("Frontend packages not installed. Use option 5.")
         return None
     env = dict(os.environ)
-    env["VITE_API_BASE_URL"] = f"http://localhost:{BACKEND_PORT}/api"
+    env["VITE_API_BASE_URL"] = f"http://127.0.0.1:{BACKEND_PORT}/api"
     log_line(f"Starting frontend on http://localhost:{FRONTEND_PORT} ...")
     try:
         process = subprocess.Popen(
@@ -675,17 +682,23 @@ def stop_all() -> None:
             stop_process(proc)
 
 
-def wait_for(url: str, timeout: float = 30.0) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+def wait_for(
+    url: str,
+    timeout: float = 30.0,
+    process: subprocess.Popen | None = None,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process is not None and process.poll() is not None:
+            return False
         status, _ = http_get(url, 1.0)
-        if status is not None and status < 500:
+        if status == 200:
             return True
         time.sleep(0.3)
     return False
 
 
-def start_all() -> None:
+def start_all() -> bool:
     if PROCESSES.get("backend") is None or PROCESSES["backend"].poll() is not None:
         proc = start_backend()
         if proc is not None:
@@ -694,15 +707,38 @@ def start_all() -> None:
         proc = start_frontend()
         if proc is not None:
             PROCESSES["frontend"] = proc
-    if PROCESSES.get("backend"):
-        wait_for(f"http://127.0.0.1:{BACKEND_PORT}/api/health")
-    if PROCESSES.get("frontend"):
-        wait_for(f"http://localhost:{FRONTEND_PORT}/")
-    if PROCESSES.get("backend"):
+
+    backend_process = PROCESSES.get("backend")
+    backend_ready = wait_for(
+        f"http://127.0.0.1:{BACKEND_PORT}/api/health",
+        timeout=30.0 if backend_process else 1.0,
+        process=backend_process,
+    )
+    frontend_process = PROCESSES.get("frontend")
+    frontend_ready = wait_for(
+        f"http://127.0.0.1:{FRONTEND_PORT}/",
+        timeout=30.0 if frontend_process else 1.0,
+        process=frontend_process,
+    )
+
+    if backend_ready:
         print(f"  Backend:  http://localhost:{BACKEND_PORT}")
-    if PROCESSES.get("frontend"):
+    else:
+        log_line("Backend did not become healthy.")
+        if backend_process is not None:
+            PROCESSES.pop("backend", None)
+            stop_process(backend_process)
+    if frontend_ready:
         print(f"  Frontend: http://localhost:{FRONTEND_PORT}")
+    else:
+        log_line("Frontend did not become healthy.")
+        if frontend_process is not None:
+            PROCESSES.pop("frontend", None)
+            stop_process(frontend_process)
+    if not (backend_ready and frontend_ready):
+        log_line("Startup incomplete; any healthy server remains running.")
     print("")
+    return backend_ready and frontend_ready
 
 
 def do_setup() -> bool:
@@ -806,16 +842,21 @@ def main(argv: list[str] | None = None) -> int:
         if not (venv_exists() and packages_installed() and env_written() and database_ready() and node_modules_ready()):
             if not do_setup():
                 return 1
-        start_all()
+        startup_ok = start_all()
+        if not PROCESSES:
+            return 0 if startup_ok else 1
         print("Press Ctrl+C to stop.")
+        runtime_ok = True
         try:
-            while True:
+            while PROCESSES:
                 time.sleep(1)
                 for name in list(PROCESSES.keys()):
                     proc = PROCESSES[name]
                     if proc.poll() is not None:
                         log_line(f"[{name}] exited")
                         PROCESSES.pop(name, None)
+                        runtime_ok = False
+            return 1 if not startup_ok or not runtime_ok else 0
         except KeyboardInterrupt:
             print("")
             stop_all()

@@ -1466,4 +1466,4 @@ if os.environ.get("SKIP_DEMO_SEED") != "1":
         add_demo_data()
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=int(os.environ.get("GELLYBANK_BACKEND_PORT", "5000")))
