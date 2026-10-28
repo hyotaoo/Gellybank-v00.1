@@ -5,12 +5,10 @@ import OtpForm from '@/components/auth/OtpForm';
 import SignUpForm from '@/components/auth/SignUpForm';
 import type { SignUpDetails } from '@/components/auth/SignUpForm';
 import SignUpSuccess from '@/components/auth/SignUpSuccess';
-import useFitScale, { DESIGN_HEIGHT, DESIGN_WIDTH } from '@/hooks/useFitScale';
 
 type Step = 'details' | 'otp' | 'success';
 
 const SignUpPage = () => {
-  const scale = useFitScale();
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('details');
   const [destination, setDestination] = useState('');
@@ -21,17 +19,10 @@ const SignUpPage = () => {
   };
 
   return (
-    <div className="flex h-[100dvh] w-full items-center justify-center overflow-hidden bg-brand-gradient font-sans text-ink">
-      <div
-        className="relative flex shrink-0 overflow-hidden bg-brand-gradient"
-        style={{
-          width: DESIGN_WIDTH,
-          height: DESIGN_HEIGHT,
-          transform: `scale(${scale})`,
-        }}
-      >
-        <section className="relative z-10 flex w-[686px] flex-none flex-col gap-4 pb-[72px] pl-[72px] pr-6 pt-[120px]">
-          <div className="flex max-h-[780px] w-[513px] flex-col overflow-y-auto rounded-[36px] bg-surface-card px-[54px] py-[35px]">
+    <div className="min-h-[100dvh] w-full overflow-x-hidden bg-brand-gradient font-sans text-ink">
+      <div className="relative mx-auto flex min-h-[100dvh] w-full max-w-[1440px] overflow-hidden">
+        <section className="relative z-10 flex w-full flex-col gap-4 px-5 py-10 sm:px-10 md:w-[686px] md:px-[72px] md:pb-[72px] md:pt-[120px]">
+          <div className="flex w-full max-w-[513px] flex-col rounded-[36px] bg-surface-card px-6 py-8 sm:px-[54px] sm:py-[35px] md:max-h-[780px] md:overflow-y-auto">
             <div className={step === 'details' ? 'contents' : 'hidden'}>
               <SignUpForm onSubmit={handleDetails} />
             </div>
@@ -51,7 +42,7 @@ const SignUpPage = () => {
             )}
           </div>
 
-          <p className="w-[513px] text-center text-[14px] font-medium leading-[1.21] text-ink">
+          <p className="w-full max-w-[513px] text-center text-[14px] font-medium leading-[1.21] text-ink">
             Already have an account?{' '}
             <Link to="/login" className="font-semibold text-primary hover:underline">
               Sign in

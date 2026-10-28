@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 import urllib.error
+from urllib.parse import quote, unquote
 import urllib.request
 from pathlib import Path
 
@@ -36,6 +37,9 @@ VENV = BACKEND / "venv"
 ENV_FILE = BACKEND / ".env"
 FRONTEND_ENV_FILE = FRONTEND / ".env"
 SCHEMA_FILE = BACKEND / "db" / "schema.sql"
+ADMIN_MIGRATION_FILE = BACKEND / "db" / "migrations" / "001_admin_operations.sql"
+BENEFICIARIES_MIGRATION_FILE = BACKEND / "db" / "migrations" / "002_beneficiaries.sql"
+LEGACY_COLUMNS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "003_legacy_model_columns.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 
 DB_NAME = os.environ.get("GELLYBANK_DB_NAME", "gellybank_db")
@@ -82,10 +86,37 @@ try:
     cursor = connection.cursor()
     cursor.execute("SHOW TABLES")
     tables = {row[0] for row in cursor.fetchall()}
-    connection.close()
 except Exception:
     sys.exit(4)
-sys.exit(0 if {"app_users", "bank_accounts"}.issubset(tables) else 3)
+if not {"app_users", "bank_accounts"}.issubset(tables):
+    connection.close()
+    sys.exit(3)
+try:
+    cursor.execute("SHOW COLUMNS FROM app_users")
+    user_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM audit_logs")
+    audit_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM transactions")
+    transaction_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM account_applications")
+    application_columns = {row[0] for row in cursor.fetchall()}
+except Exception:
+    connection.close()
+    sys.exit(5)
+connection.close()
+required_tables = {
+    "account_applications",
+    "password_reset_tokens",
+    "beneficiaries",
+}
+admin_schema_ready = (
+    required_tables.issubset(tables)
+    and "auth_token_version" in user_columns
+    and "severity" in audit_columns
+    and "status" in transaction_columns
+    and "created_account_id" in application_columns
+)
+sys.exit(0 if admin_schema_ready else 5)
 """
 
 
@@ -192,7 +223,7 @@ def parse_db_url(url: str) -> dict:
     parts = match.groupdict()
     return {
         "user": parts["user"],
-        "password": parts["password"],
+        "password": unquote(parts["password"]),
         "host": parts["host"],
         "port": int(parts["port"] or 3306),
         "database": parts["database"],
@@ -219,13 +250,17 @@ def env_written() -> bool:
 
 
 def database_ready() -> bool:
+    return database_check_code() == 0
+
+
+def database_check_code() -> int:
     url = read_env_file().get("DATABASE_URL")
     if not url or not venv_exists():
-        return False
+        return 4
     try:
         parts = parse_db_url(url)
     except ValueError:
-        return False
+        return 4
     environment = dict(os.environ)
     environment.update(
         {
@@ -244,9 +279,9 @@ def database_ready() -> bool:
             text=True,
             timeout=30,
         )
-        return result.returncode == 0
+        return result.returncode
     except (OSError, subprocess.SubprocessError):
-        return False
+        return 4
 
 
 def valid_app_password(password: str) -> bool:
@@ -259,7 +294,8 @@ def generate_app_password() -> str:
 
 def write_env(app_password: str) -> bool:
     secret_key = secrets.token_urlsafe(48)
-    url = f"mysql+pymysql://{DB_USER}:{app_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    encoded_password = quote(app_password, safe="")
+    url = f"mysql+pymysql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     content = (
         "# Written by dev.py.\n"
         f"# The app connects to MySQL as '{DB_USER}' ({DB_NAME} database).\n"
@@ -279,7 +315,7 @@ def write_env(app_password: str) -> bool:
 def write_frontend_env() -> bool:
     if FRONTEND_ENV_FILE.exists():
         return False
-    content = f"VITE_API_BASE_URL=http://localhost:{BACKEND_PORT}/api\n"
+    content = f"VITE_API_BASE_URL=http://127.0.0.1:{BACKEND_PORT}/api\n"
     try:
         FRONTEND_ENV_FILE.write_text(content, encoding="utf-8")
         log_line(f"Wrote {relative(FRONTEND_ENV_FILE)}")
@@ -317,6 +353,13 @@ def npm_version() -> str | None:
 def show_status() -> None:
     print("")
     print("  Status")
+    database_check = database_check_code()
+    if database_check == 0:
+        database_detail, database_state = f"{env_database_name()} ready", "ok"
+    elif database_check == 5:
+        database_detail, database_state = f"{env_database_name()} needs schema migration", "missing"
+    else:
+        database_detail, database_state = f"{env_database_name()} not ready", "missing"
     checks = [
         ("Python", f"{platform.python_version()} ({platform.system()})", "ok"),
         ("Node.js", node_version() or "not found", "ok" if node_version() else "missing"),
@@ -325,7 +368,7 @@ def show_status() -> None:
         ("Virtual env", relative(VENV) if venv_exists() else "not created", "ok" if venv_exists() else "missing"),
         ("Python packages", "installed" if packages_installed() else "not installed", "ok" if packages_installed() else "missing"),
         ("backend/.env", "written" if env_written() else "not written", "ok" if env_written() else "missing"),
-        ("MySQL database", f"{env_database_name()} ready" if database_ready() else f"{env_database_name()} not ready", "ok" if database_ready() else "missing"),
+        ("MySQL database", database_detail, database_state),
         ("Frontend packages", "installed" if node_modules_ready() else "not installed", "ok" if node_modules_ready() else "missing"),
     ]
     for name, detail, state in checks:
@@ -925,6 +968,8 @@ def prompt_password(prompt: str) -> str:
 
 
 def setup_database() -> bool:
+    if database_check_code() == 5:
+        return apply_schema_migrations()
     if not env_written():
         print()
         while True:
@@ -1019,6 +1064,7 @@ def start_backend() -> subprocess.Popen | None:
         return None
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
+    env["GELLYBANK_BACKEND_PORT"] = str(BACKEND_PORT)
     log_line(f"Starting backend on http://localhost:{BACKEND_PORT} ...")
     try:
         process = subprocess.Popen(
@@ -1035,6 +1081,10 @@ def start_backend() -> subprocess.Popen | None:
 
 def start_frontend() -> subprocess.Popen | None:
     if port_in_use(FRONTEND_PORT):
+        status, _ = http_get(f"http://localhost:{FRONTEND_PORT}/", 1.5)
+        if status == 200:
+            log_line(f"Frontend already running on http://localhost:{FRONTEND_PORT}")
+            return None
         log_line(f"Port {FRONTEND_PORT} is in use by another process.")
         return None
     if not shutil.which("npm"):
@@ -1044,11 +1094,14 @@ def start_frontend() -> subprocess.Popen | None:
         log_line("Frontend packages not installed. Use option 5.")
         return None
     env = dict(os.environ)
-    env["VITE_API_BASE_URL"] = f"http://localhost:{BACKEND_PORT}/api"
+    env["VITE_API_BASE_URL"] = f"http://127.0.0.1:{BACKEND_PORT}/api"
     log_line(f"Starting frontend on http://localhost:{FRONTEND_PORT} ...")
     try:
         process = subprocess.Popen(
-            npm_command("run", "dev", "--", "--port", str(FRONTEND_PORT), "--strictPort"),
+            npm_command(
+                "run", "dev", "--", "--host", "127.0.0.1",
+                "--port", str(FRONTEND_PORT), "--strictPort",
+            ),
             cwd=str(FRONTEND), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1, **spawn_options(),
         )
@@ -1096,17 +1149,25 @@ def stop_all() -> None:
             stop_process(proc)
 
 
-def wait_for(url: str, timeout: float = 30.0) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+def wait_for(
+    url: str,
+    timeout: float = 30.0,
+    process: subprocess.Popen | None = None,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process is not None and process.poll() is not None:
+            return False
         status, _ = http_get(url, 1.0)
-        if status is not None and status < 500:
+        if status != 200 and "127.0.0.1" in url:
+            status, _ = http_get(url.replace("127.0.0.1", "localhost"), 1.0)
+        if status == 200:
             return True
         time.sleep(0.3)
     return False
 
 
-def start_all() -> None:
+def start_all() -> bool:
     if PROCESSES.get("backend") is None or PROCESSES["backend"].poll() is not None:
         proc = start_backend()
         if proc is not None:
@@ -1115,15 +1176,38 @@ def start_all() -> None:
         proc = start_frontend()
         if proc is not None:
             PROCESSES["frontend"] = proc
-    if PROCESSES.get("backend"):
-        wait_for(f"http://127.0.0.1:{BACKEND_PORT}/api/health")
-    if PROCESSES.get("frontend"):
-        wait_for(f"http://localhost:{FRONTEND_PORT}/")
-    if PROCESSES.get("backend"):
+
+    backend_process = PROCESSES.get("backend")
+    backend_ready = wait_for(
+        f"http://127.0.0.1:{BACKEND_PORT}/api/health",
+        timeout=30.0 if backend_process else 1.0,
+        process=backend_process,
+    )
+    frontend_process = PROCESSES.get("frontend")
+    frontend_ready = wait_for(
+        f"http://127.0.0.1:{FRONTEND_PORT}/",
+        timeout=30.0 if frontend_process else 1.0,
+        process=frontend_process,
+    )
+
+    if backend_ready:
         print(f"  Backend:  http://localhost:{BACKEND_PORT}")
-    if PROCESSES.get("frontend"):
+    else:
+        log_line("Backend did not become healthy.")
+        if backend_process is not None:
+            PROCESSES.pop("backend", None)
+            stop_process(backend_process)
+    if frontend_ready:
         print(f"  Frontend: http://localhost:{FRONTEND_PORT}")
+    else:
+        log_line("Frontend did not become healthy.")
+        if frontend_process is not None:
+            PROCESSES.pop("frontend", None)
+            stop_process(frontend_process)
+    if not (backend_ready and frontend_ready):
+        log_line("Startup incomplete; any healthy server remains running.")
     print("")
+    return backend_ready and frontend_ready
 
 
 def do_setup() -> bool:
@@ -1145,9 +1229,16 @@ def do_setup() -> bool:
         if not write_env(app_password):
             return False
         write_frontend_env()
-    if not database_ready():
+    database_check = database_check_code()
+    if database_check == 5:
+        if not apply_schema_migrations():
+            return False
+    elif database_check != 0:
         if not setup_database():
             return False
+    if not database_ready():
+        log_line("Database setup finished, but the required schema is still not ready.")
+        return False
     if not node_modules_ready():
         if not npm_install():
             return False
@@ -1210,6 +1301,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start", action="store_true", help="set up if needed, start servers, then exit")
     parser.add_argument("--version", action="version", version="Gellybank dev tool 1.1.0")
     parser.add_argument("--internal-db-setup", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--internal-schema-migration", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     if args.internal_db_setup:
@@ -1231,16 +1323,21 @@ def main(argv: list[str] | None = None) -> int:
         if not (venv_exists() and packages_installed() and env_written() and database_ready() and node_modules_ready()):
             if not do_setup():
                 return 1
-        start_all()
+        startup_ok = start_all()
+        if not PROCESSES:
+            return 0 if startup_ok else 1
         print("Press Ctrl+C to stop.")
+        runtime_ok = True
         try:
-            while True:
+            while PROCESSES:
                 time.sleep(1)
                 for name in list(PROCESSES.keys()):
                     proc = PROCESSES[name]
                     if proc.poll() is not None:
                         log_line(f"[{name}] exited")
                         PROCESSES.pop(name, None)
+                        runtime_ok = False
+            return 1 if not startup_ok or not runtime_ok else 0
         except KeyboardInterrupt:
             print("")
             stop_all()

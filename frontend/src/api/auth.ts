@@ -20,7 +20,7 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   email: string;
-  role: 'customer' | 'admin';
+  role: 'customer' | 'teller' | 'admin';
 }
 
 export interface AuthResponse {
@@ -38,3 +38,9 @@ export const register = (input: RegisterInput): Promise<AuthResponse> =>
 
 export const login = (input: LoginInput): Promise<AuthResponse> =>
   apiRequest<AuthResponse>('/auth/login', { method: 'POST', body: input });
+
+export const resetPassword = (token: string, password: string): Promise<{ message: string }> =>
+  apiRequest<{ message: string }>('/auth/reset-password', {
+    method: 'POST',
+    body: { token, password },
+  });

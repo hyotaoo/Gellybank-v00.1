@@ -13,22 +13,17 @@
   }
   55% {
     opacity: var(--coin-opacity, 1);
-    transform: translate3d(var(--coin-x, 0px), 0, 0)
+    transform: translate3d(0, 0, 0)
       rotate(var(--coin-turns, 360deg));
   }
-  72% {
+  75% {
     opacity: var(--coin-opacity, 1);
-    transform: translate3d(var(--coin-x, 0px), 0, 0)
-      rotate(var(--coin-turns, 360deg));
-  }
-  86% {
-    opacity: 0.55;
-    transform: translate3d(var(--coin-x, 0px), 16px, 0)
+    transform: translate3d(0, 8px, 0)
       rotate(calc(var(--coin-turns, 360deg) + 25deg)) scale(0.8);
   }
   100% {
     opacity: 0;
-    transform: translate3d(var(--coin-x, 0px), 36px, 0)
+    transform: translate3d(0, 24px, 0)
       rotate(calc(var(--coin-turns, 360deg) + 50deg)) scale(0.3);
   }
 }

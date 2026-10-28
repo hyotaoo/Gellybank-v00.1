@@ -54,10 +54,10 @@ const DepositPage = () => {
 
   return (
     <DashboardLayout title="Deposit">
-      <div className="flex flex-1 gap-6 overflow-hidden">
+      <div className="flex flex-1 flex-col gap-6 pb-2 lg:flex-row lg:overflow-hidden">
         <form
           onSubmit={handleSubmit}
-          className="flex flex-1 flex-col gap-5 overflow-y-auto rounded-[28px] border border-surface-line bg-surface-soft p-8"
+          className="flex flex-1 flex-col gap-5 rounded-[28px] border border-surface-line bg-surface-soft p-5 sm:p-8 lg:overflow-y-auto"
         >
           <AccountSelect
             label="Deposit to"
@@ -77,7 +77,7 @@ const DepositPage = () => {
             <Input value={note} onChange={(event) => setNote(event.target.value)} placeholder="e.g. Payroll" />
           </label>
 
-          <div className="mt-2 flex items-center gap-4">
+          <div className="mt-2 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-4">
             <Button
               type="submit"
               variant="primary"
@@ -97,7 +97,7 @@ const DepositPage = () => {
           </div>
         </form>
 
-        <aside className="flex w-[350px] flex-none flex-col gap-5 rounded-[28px] bg-[rgba(248,231,185,0.32)] p-8">
+        <aside className="flex w-full flex-none flex-col gap-5 rounded-[28px] bg-[rgba(248,231,185,0.32)] p-5 sm:p-8 lg:w-[350px]">
           <h2 className="text-[18px] font-semibold leading-[1.21] text-ink">Deposit summary</h2>
           <dl className="flex flex-col gap-3 text-[14px] leading-[1.21]">
             <div className="flex items-center justify-between">

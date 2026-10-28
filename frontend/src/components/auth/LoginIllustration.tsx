@@ -2,8 +2,6 @@ import type { CSSProperties } from 'react';
 import gellyObject from '@/assets/gelly-object.png';
 import coin from '@/assets/coin.png';
 
-const HOLE = { left: 294, top: 495 };
-
 const FALLING_COINS = [
   { key: 0, size: 40, dx: -12, start: -360, dur: 3.4, delay: 0, opacity: 0.9, turns: '360deg' },
   { key: 1, size: 44, dx: 8, start: -320, dur: 3.0, delay: 0.55, opacity: 1, turns: '720deg' },
@@ -14,36 +12,37 @@ const FALLING_COINS = [
 ] as const;
 
 const LoginIllustration = () => (
-  <section className="relative flex flex-1">
-    <img
-      src={gellyObject}
-      alt="GellyBank login illustration"
-      className="absolute left-[67px] top-[449px] h-[507px] w-[491px] max-w-none"
-    />
-
-    {FALLING_COINS.map((c) => (
+  <section className="absolute inset-y-0 right-0 hidden w-[754px] overflow-hidden lg:block">
+    <div className="absolute bottom-[-34px] left-[90px] h-[460px] w-[446px] xl:bottom-[-12px] xl:left-[67px] xl:h-[507px] xl:w-[491px]">
       <img
-        key={`coin-fall-${c.key}`}
-        src={coin}
-        alt=""
-        aria-hidden="true"
-        className="pointer-events-none absolute max-w-none animate-coin-fall"
-        style={
-          {
-            left: `${HOLE.left + c.dx}px`,
-            top: `${HOLE.top}px`,
-            width: `${c.size}px`,
-            height: `${c.size}px`,
-            animationDelay: `${c.delay}s`,
-            '--coin-x': `${c.dx}px`,
-            '--coin-start': `${c.start}px`,
-            '--coin-opacity': c.opacity,
-            '--coin-turns': c.turns,
-            '--coin-dur': `${c.dur}s`,
-          } as CSSProperties
-        }
+        src={gellyObject}
+        alt="GellyBank login illustration"
+        className="h-full w-full max-w-none"
       />
-    ))}
+
+      {FALLING_COINS.map((c) => (
+        <img
+          key={`coin-fall-${c.key}`}
+          src={coin}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute top-[8%] max-w-none animate-coin-fall"
+          style={
+            {
+              width: `${c.size}px`,
+              height: `${c.size}px`,
+              left: `calc(50% - ${c.size / 2}px)`,
+              animationDelay: `${c.delay}s`,
+              '--coin-x': `${c.dx}px`,
+              '--coin-start': `${c.start}px`,
+              '--coin-opacity': c.opacity,
+              '--coin-turns': c.turns,
+              '--coin-dur': `${c.dur}s`,
+            } as CSSProperties
+          }
+        />
+      ))}
+    </div>
 
     <span className="pointer-events-none absolute right-[-89px] top-[-95px] h-[390px] w-[427px] rounded-full bg-white/10" />
   </section>

@@ -2,8 +2,11 @@
 
 import os
 import random
-from datetime import datetime, timezone
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from functools import wraps
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -11,6 +14,8 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -41,6 +46,8 @@ CORS(app)
 db = SQLAlchemy()
 db.init_app(app)
 
+ID_TYPE = db.BigInteger().with_variant(db.Integer, "sqlite")
+SMALL_ID_TYPE = db.SmallInteger().with_variant(db.Integer, "sqlite")
 
 
 DEFAULT_CURRENCY = "PHP"
@@ -107,28 +114,79 @@ def check_password(password_hash, password):
 
 def make_token(user):
     serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
-    return serializer.dumps({"user_id": user.user_id}, salt="auth")
+    return serializer.dumps({
+        "user_id": user.user_id,
+        "auth_token_version": user.auth_token_version,
+    }, salt="auth")
 
 
 def current_user():
+    return authenticated_user()
+
+
+def authenticated_user():
     header = request.headers.get("Authorization", "")
-    if header.startswith("Bearer "):
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
-        try:
-            data = serializer.loads(header[7:], salt="auth", max_age=TOKEN_MAX_AGE)
-            user = db.session.get(AppUser, data.get("user_id"))
-            if user:
-                return user
-        except (BadSignature, SignatureExpired):
-            pass  
-    return AppUser.query.filter_by(username=DEMO_EMAIL).first()
+    if not header.startswith("Bearer "):
+        return None
+
+    serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
+    try:
+        data = serializer.loads(header[7:], salt="auth", max_age=TOKEN_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
+
+    user = db.session.get(AppUser, data.get("user_id"))
+    if not user or not user.is_active:
+        return None
+    if data.get("auth_token_version", 0) != user.auth_token_version:
+        return None
+    return user
+
+
+def authenticated_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not authenticated_user():
+            return error("Authentication required.", 401, "unauthorized")
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def role_required(role):
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            user = authenticated_user()
+            if not user:
+                return error("Authentication required.", 401, "unauthorized")
+            if user.role != role.upper():
+                return error("You do not have permission to perform this action.", 403, "forbidden")
+            return view(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+def admin_required(view):
+    return role_required("ADMIN")(view)
+
+
+def log_audit(action, entity_type, entity_id=None, actor_user_id=None, severity="INFO", details=None):
+    db.session.add(AuditLog(
+        actor_user_id=actor_user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=str(entity_id) if entity_id is not None else None,
+        severity=severity,
+        details=details,
+        ip_address=request.remote_addr,
+    ))
 
 
 
 class Customer(db.Model):
     __tablename__ = "customers"
 
-    customer_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    customer_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     first_name = db.Column(db.String(50), nullable=False)
     middle_name = db.Column(db.String(50))
     last_name = db.Column(db.String(50), nullable=False)
@@ -149,12 +207,13 @@ class Customer(db.Model):
 class AppUser(db.Model):
     __tablename__ = "app_users"
 
-    user_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    user_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.customer_id"))
     username = db.Column(db.String(50), nullable=False, unique=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default="CUSTOMER")
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    auth_token_version = db.Column(db.Integer, nullable=False, default=0)
     last_login_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=utcnow)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
@@ -172,14 +231,18 @@ class AppUser(db.Model):
             "firstName": customer.first_name if customer else self.username,
             "lastName": customer.last_name if customer else "",
             "email": customer.email if customer else self.username,
-            "role": "admin" if self.role in ("ADMIN", "TELLER") else "customer",
+            "role": {
+                "ADMIN": "admin",
+                "TELLER": "teller",
+                "CUSTOMER": "customer",
+            }.get(self.role, "customer"),
         }
 
 
 class AccountType(db.Model):
     __tablename__ = "account_types"
 
-    account_type_id = db.Column(db.SmallInteger, primary_key=True, autoincrement=True)
+    account_type_id = db.Column(SMALL_ID_TYPE, primary_key=True, autoincrement=True)
     type_name = db.Column(db.String(30), nullable=False, unique=True)  
     description = db.Column(db.String(255))
     minimum_balance = db.Column(db.Numeric(15, 2), nullable=False, default=0)
@@ -190,7 +253,7 @@ class AccountType(db.Model):
 class BankAccount(db.Model):
     __tablename__ = "bank_accounts"
 
-    account_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    account_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.customer_id"), nullable=False)
     account_type_id = db.Column(
         db.SmallInteger, db.ForeignKey("account_types.account_type_id"), nullable=False
@@ -229,7 +292,7 @@ class BankAccount(db.Model):
 class Transfer(db.Model):
     __tablename__ = "transfers"
 
-    transfer_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    transfer_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     reference_code = db.Column(db.String(40), nullable=False, unique=True)
     from_account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"), nullable=False)
     to_account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"), nullable=False)
@@ -244,7 +307,7 @@ class Transfer(db.Model):
 class Transaction(db.Model):
     __tablename__ = "transactions"
 
-    transaction_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    transaction_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"), nullable=False)
     transfer_id = db.Column(db.BigInteger, db.ForeignKey("transfers.transfer_id"))
     transaction_type = db.Column(db.String(20), nullable=False)
@@ -300,7 +363,7 @@ class Transaction(db.Model):
 class BankCard(db.Model):
     __tablename__ = "bank_cards"
 
-    card_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    card_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"), nullable=False)
     card_number_token_or_last4 = db.Column(db.String(100), nullable=False, unique=True)
     card_type = db.Column(db.String(20), nullable=False, default="DEBIT")  
@@ -322,7 +385,7 @@ class BankCard(db.Model):
 class Beneficiary(db.Model):
     __tablename__ = "beneficiaries"
 
-    beneficiary_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    beneficiary_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.customer_id"), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     account_number = db.Column(db.String(30), nullable=False)
@@ -337,6 +400,96 @@ class Beneficiary(db.Model):
             "bank": self.bank,
         }
 
+
+class AccountApplication(db.Model):
+    __tablename__ = "account_applications"
+
+    application_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
+    customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.customer_id"), nullable=False)
+    applicant_user_id = db.Column(db.BigInteger, db.ForeignKey("app_users.user_id"), nullable=False)
+    account_type_id = db.Column(
+        db.SmallInteger, db.ForeignKey("account_types.account_type_id"), nullable=False
+    )
+    initial_deposit = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    account_label = db.Column(db.String(40))
+    make_primary = db.Column(db.Boolean, nullable=False, default=False)
+    status = db.Column(db.String(20), nullable=False, default="PENDING")
+    rejection_reason = db.Column(db.String(500))
+    created_account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"))
+    reviewed_by_user_id = db.Column(db.BigInteger, db.ForeignKey("app_users.user_id"))
+    created_at = db.Column(db.DateTime, default=utcnow)
+    reviewed_at = db.Column(db.DateTime)
+
+    @property
+    def customer(self):
+        return db.session.get(Customer, self.customer_id)
+
+    @property
+    def account_type(self):
+        return db.session.get(AccountType, self.account_type_id)
+
+    def to_dict(self):
+        customer = self.customer
+        account_type = self.account_type
+        account = (
+            db.session.get(BankAccount, self.created_account_id)
+            if self.created_account_id is not None
+            else None
+        )
+        return {
+            "id": str(self.application_id),
+            "customerId": str(self.customer_id),
+            "customerName": customer.full_name if customer else "",
+            "customerEmail": customer.email if customer else "",
+            "accountType": account_type.type_name.lower() if account_type else "",
+            "initialDeposit": as_number(self.initial_deposit),
+            "label": self.account_label,
+            "status": self.status.lower(),
+            "rejectionReason": self.rejection_reason,
+            "accountId": str(self.created_account_id) if self.created_account_id is not None else None,
+            "accountNumber": account.account_number if account else None,
+            "createdAt": self.created_at.isoformat() + "Z" if self.created_at else None,
+            "reviewedAt": self.reviewed_at.isoformat() + "Z" if self.reviewed_at else None,
+        }
+
+
+class PasswordResetToken(db.Model):
+    __tablename__ = "password_reset_tokens"
+
+    reset_token_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
+    user_id = db.Column(
+        db.BigInteger, db.ForeignKey("app_users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash = db.Column(db.String(64), nullable=False, unique=True)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+
+class AuditLog(db.Model):
+    __tablename__ = "audit_logs"
+
+    audit_log_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
+    actor_user_id = db.Column(db.BigInteger, db.ForeignKey("app_users.user_id"))
+    action = db.Column(db.String(100), nullable=False)
+    entity_type = db.Column(db.String(50), nullable=False)
+    entity_id = db.Column(db.String(100))
+    details = db.Column(db.JSON)
+    severity = db.Column(db.String(10), nullable=False, default="INFO")
+    ip_address = db.Column(db.String(45))
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    def to_dict(self):
+        return {
+            "id": str(self.audit_log_id),
+            "actorId": str(self.actor_user_id) if self.actor_user_id is not None else None,
+            "action": self.action,
+            "entityType": self.entity_type,
+            "entityId": self.entity_id,
+            "severity": self.severity,
+            "details": self.details or {},
+            "ipAddress": self.ip_address,
+            "createdAt": self.created_at.isoformat() + "Z" if self.created_at else None,
+        }
 
 
 def primary_account_id(customer_id):
@@ -359,6 +512,7 @@ def my_account(account_id, user):
 
 
 @app.get("/api/accounts")
+@authenticated_required
 def list_accounts():
     user = current_user()
     if not user.customer_id:
@@ -375,8 +529,13 @@ def list_accounts():
 
 
 @app.post("/api/accounts")
+@authenticated_required
 def create_account():
-    user = current_user()
+    user = authenticated_user()
+    if not user:
+        return error("Authentication required.", 401, "unauthorized")
+    if user.role != "CUSTOMER":
+        return error("Only customer accounts can apply for a bank account.", 403, "forbidden")
     if not user.customer_id:
         return error("No customer profile for this user.", 400, "no_customer")
 
@@ -392,22 +551,261 @@ def create_account():
         return error("Enter a valid initial deposit.", 400, "invalid_amount")
     if initial < 0:
         return error("Initial deposit cannot be negative.", 400, "invalid_amount")
+    if type_name == "SAVINGS" and initial > 0 and initial < account_type.minimum_balance:
+        return error(
+            f"Savings accounts require at least {as_number(account_type.minimum_balance):.2f} to open.",
+            400,
+            "minimum_initial_deposit",
+        )
 
-    account = BankAccount(
+    application = AccountApplication(
         customer_id=user.customer_id,
+        applicant_user_id=user.user_id,
         account_type_id=account_type.account_type_id,
-        account_number=new_account_number(),
-        current_balance=initial,
-        interest_rate=account_type.default_interest_rate,
+        initial_deposit=initial,
+        account_label=(data.get("label") or "").strip()[:40] or None,
+        make_primary=bool(data.get("isPrimary")),
     )
-    db.session.add(account)
+    db.session.add(application)
     db.session.commit()
 
-    primary = primary_account_id(user.customer_id)
-    return jsonify(account.to_dict(is_primary=(account.account_id == primary))), 201
+    result = application.to_dict()
+    result["label"] = application.account_label or account_type.type_name.title()
+    return jsonify(result), 201
+
+
+@app.get("/api/admin/dashboard")
+@admin_required
+def admin_dashboard():
+    try:
+        db.session.execute(text("SELECT 1"))
+        metrics = {
+            "totalUsers": AppUser.query.count(),
+            "pendingApplications": AccountApplication.query.filter_by(status="PENDING").count(),
+            "totalAccounts": BankAccount.query.count(),
+            "systemHealth": "healthy",
+        }
+    except SQLAlchemyError:
+        db.session.rollback()
+        return error("Unable to load admin dashboard metrics.", 503, "system_unavailable")
+
+    return jsonify(metrics)
+
+
+@app.get("/api/admin/users")
+@admin_required
+def admin_list_users():
+    query = AppUser.query.outerjoin(Customer, AppUser.customer_id == Customer.customer_id)
+    search = request.args.get("search", "").strip()
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            db.or_(
+                AppUser.username.ilike(pattern),
+                Customer.first_name.ilike(pattern),
+                Customer.last_name.ilike(pattern),
+                db.cast(AppUser.user_id, db.String).ilike(pattern),
+            )
+        )
+    users = query.order_by(AppUser.user_id.desc()).all()
+    return jsonify([
+        {
+            "id": str(user.user_id),
+            "name": user.customer.full_name if user.customer else user.username,
+            "email": user.customer.email if user.customer else user.username,
+            "role": user.to_dict()["role"],
+            "status": "active" if user.is_active else "suspended",
+        }
+        for user in users
+    ])
+
+
+@app.patch("/api/admin/users/<user_id>")
+@admin_required
+def admin_update_user(user_id):
+    user = db.session.get(AppUser, as_int(user_id))
+    if not user:
+        return error("User not found.", 404, "not_found")
+    data = body()
+    new_role = str(data.get("role") or user.role).upper()
+    if new_role not in ("ADMIN", "TELLER", "CUSTOMER"):
+        return error("Role must be customer, teller, or admin.", 400, "invalid_role")
+    if "isActive" in data and not isinstance(data["isActive"], bool):
+        return error("isActive must be a boolean.", 400, "invalid_status")
+
+    actor = authenticated_user()
+    is_active = data.get("isActive", user.is_active)
+    if actor.user_id == user.user_id and (new_role != "ADMIN" or not is_active):
+        return error("You cannot remove your own admin access.", 400, "self_access_change")
+    if user.role == "ADMIN" and (new_role != "ADMIN" or not is_active):
+        active_admins = AppUser.query.filter_by(role="ADMIN", is_active=True).count()
+        if user.is_active and active_admins <= 1:
+            return error("At least one active admin account must remain.", 409, "last_admin")
+
+    old_role = user.role
+    old_active = user.is_active
+    user.role = new_role
+    user.is_active = is_active
+    if old_role != new_role:
+        log_audit(
+            "USER_ROLE_UPDATED",
+            "APP_USER",
+            entity_id=user.user_id,
+            actor_user_id=actor.user_id,
+            details={"from": old_role.lower(), "to": new_role.lower()},
+        )
+    if old_active != is_active:
+        log_audit(
+            "USER_STATUS_UPDATED",
+            "APP_USER",
+            entity_id=user.user_id,
+            actor_user_id=actor.user_id,
+            severity="WARN" if not is_active else "INFO",
+            details={"status": "active" if is_active else "suspended"},
+        )
+    db.session.commit()
+    return jsonify({
+        "id": str(user.user_id),
+        "name": user.customer.full_name if user.customer else user.username,
+        "email": user.customer.email if user.customer else user.username,
+        "role": user.to_dict()["role"],
+        "status": "active" if user.is_active else "suspended",
+    })
+
+
+@app.post("/api/admin/users/<user_id>/password-reset")
+@admin_required
+def admin_issue_password_reset(user_id):
+    user = db.session.get(AppUser, as_int(user_id))
+    if not user:
+        return error("User not found.", 404, "not_found")
+    if not user.is_active:
+        return error("A suspended user cannot receive a password reset link.", 409, "user_suspended")
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    PasswordResetToken.query.filter_by(user_id=user.user_id).delete()
+    db.session.add(PasswordResetToken(
+        user_id=user.user_id,
+        token_hash=token_hash,
+        expires_at=utcnow() + timedelta(hours=1),
+    ))
+    actor = authenticated_user()
+    log_audit(
+        "PASSWORD_RESET_ISSUED",
+        "APP_USER",
+        entity_id=user.user_id,
+        actor_user_id=actor.user_id,
+        severity="WARN",
+    )
+    db.session.commit()
+    return jsonify({"resetToken": token, "expiresInSeconds": 3600})
+
+
+@app.get("/api/admin/applications")
+@admin_required
+def admin_list_applications():
+    status = request.args.get("status", "pending").upper()
+    if status not in ("PENDING", "APPROVED", "REJECTED", "ALL"):
+        return error("Status must be pending, approved, rejected, or all.", 400, "invalid_status")
+    query = AccountApplication.query
+    if status != "ALL":
+        query = query.filter_by(status=status)
+    applications = query.order_by(AccountApplication.created_at.desc()).all()
+    return jsonify([application.to_dict() for application in applications])
+
+
+@app.post("/api/admin/applications/<application_id>/decision")
+@admin_required
+def admin_decide_application(application_id):
+    application = AccountApplication.query.filter_by(
+        application_id=as_int(application_id)
+    ).with_for_update().first()
+    if not application:
+        return error("Application not found.", 404, "not_found")
+    if application.status != "PENDING":
+        return error("This application has already been reviewed.", 409, "already_reviewed")
+
+    data = body()
+    decision = str(data.get("decision") or "").lower()
+    if decision not in ("approve", "reject"):
+        return error("Decision must be approve or reject.", 400, "invalid_decision")
+    reason = str(data.get("reason") or "").strip()
+    if decision == "reject" and not reason:
+        return error("A rejection reason is required.", 400, "reason_required")
+    if len(reason) > 500:
+        return error("Rejection reason must be 500 characters or fewer.", 400, "reason_too_long")
+
+    actor = authenticated_user()
+    application.reviewed_by_user_id = actor.user_id
+    application.reviewed_at = utcnow()
+    if decision == "reject":
+        application.status = "REJECTED"
+        application.rejection_reason = reason
+        log_audit(
+            "ACCOUNT_APPLICATION_REJECTED",
+            "ACCOUNT_APPLICATION",
+            entity_id=application.application_id,
+            actor_user_id=actor.user_id,
+            severity="WARN",
+            details={"reason": reason},
+        )
+    else:
+        account_type = db.session.get(AccountType, application.account_type_id)
+        if not account_type:
+            return error("The requested account type is no longer available.", 409, "invalid_account_type")
+        account = BankAccount(
+            customer_id=application.customer_id,
+            account_type_id=application.account_type_id,
+            account_number=new_account_number(),
+            current_balance=application.initial_deposit,
+            interest_rate=account_type.default_interest_rate,
+        )
+        db.session.add(account)
+        db.session.flush()
+        application.created_account_id = account.account_id
+        if application.initial_deposit > 0:
+            db.session.add(Transaction(
+                account_id=account.account_id,
+                transaction_type="DEPOSIT",
+                amount=application.initial_deposit,
+                balance_after=application.initial_deposit,
+                reference_code=new_reference(),
+                description="Initial deposit from approved account application",
+                performed_by_user_id=application.applicant_user_id,
+            ))
+        application.status = "APPROVED"
+        log_audit(
+            "ACCOUNT_APPLICATION_APPROVED",
+            "ACCOUNT_APPLICATION",
+            entity_id=application.application_id,
+            actor_user_id=actor.user_id,
+            details={"accountId": str(account.account_id)},
+        )
+    db.session.commit()
+    return jsonify(application.to_dict())
+
+
+@app.get("/api/admin/logs")
+@admin_required
+def admin_list_logs():
+    query = AuditLog.query
+    severity = request.args.get("severity", "").upper()
+    actor_id = request.args.get("actorId")
+    if severity:
+        if severity not in ("INFO", "WARN", "ERROR"):
+            return error("Severity must be INFO, WARN, or ERROR.", 400, "invalid_severity")
+        query = query.filter_by(severity=severity)
+    if actor_id:
+        parsed_actor_id = as_int(actor_id)
+        if parsed_actor_id is None:
+            return error("Actor ID must be numeric.", 400, "invalid_actor")
+        query = query.filter_by(actor_user_id=parsed_actor_id)
+    entries = query.order_by(AuditLog.created_at.desc()).limit(200).all()
+    return jsonify([entry.to_dict() for entry in entries])
 
 
 @app.get("/api/accounts/<account_id>")
+@authenticated_required
 def get_account(account_id):
     user = current_user()
     account = my_account(account_id, user)
@@ -419,6 +817,7 @@ def get_account(account_id):
 
 
 @app.patch("/api/accounts/<account_id>")
+@authenticated_required
 def update_account(account_id):
     user = current_user()
     account = my_account(account_id, user)
@@ -430,6 +829,7 @@ def update_account(account_id):
 
 
 @app.delete("/api/accounts/<account_id>")
+@authenticated_required
 def close_account(account_id):
     account = my_account(account_id, current_user())
     if not account:
@@ -458,7 +858,14 @@ def my_transaction(tx_id, user):
     )
 
 
+def reject_admin_transaction(user):
+    if user.role == "ADMIN":
+        return error("Admins cannot execute or modify financial transactions.", 403, "admin_transaction_forbidden")
+    return None
+
+
 @app.get("/api/transactions")
+@authenticated_required
 def list_transactions():
     user = current_user()
     if not user.customer_id:
@@ -483,8 +890,12 @@ def list_transactions():
 
 
 @app.post("/api/transactions")
+@authenticated_required
 def create_transaction():
     user = current_user()
+    denied = reject_admin_transaction(user)
+    if denied:
+        return denied
     data = body()
 
     account = my_account(data.get("accountId"), user)
@@ -527,8 +938,12 @@ def create_transaction():
 
 
 @app.post("/api/transactions/transfer")
+@authenticated_required
 def create_transfer():
     user = current_user()
+    denied = reject_admin_transaction(user)
+    if denied:
+        return denied
     data = body()
 
     source = my_account(data.get("sourceAccountId"), user)
@@ -614,8 +1029,13 @@ def create_transfer():
 
 
 @app.patch("/api/transactions/<tx_id>")
+@authenticated_required
 def update_note(tx_id):
-    tx = my_transaction(tx_id, current_user())
+    user = current_user()
+    denied = reject_admin_transaction(user)
+    if denied:
+        return denied
+    tx = my_transaction(tx_id, user)
     if not tx:
         return error("Transaction not found.", 404, "not_found")
 
@@ -625,8 +1045,13 @@ def update_note(tx_id):
 
 
 @app.delete("/api/transactions/<tx_id>")
+@authenticated_required
 def void_transaction(tx_id):
-    tx = my_transaction(tx_id, current_user())
+    user = current_user()
+    denied = reject_admin_transaction(user)
+    if denied:
+        return denied
+    tx = my_transaction(tx_id, user)
     if not tx:
         return error("Transaction not found.", 404, "not_found")
 
@@ -645,6 +1070,7 @@ def my_beneficiary(ben_id, user):
 
 
 @app.get("/api/beneficiaries")
+@authenticated_required
 def list_beneficiaries():
     user = current_user()
     if not user.customer_id:
@@ -660,6 +1086,7 @@ def list_beneficiaries():
 
 
 @app.post("/api/beneficiaries")
+@authenticated_required
 def create_beneficiary():
     user = current_user()
     if not user.customer_id:
@@ -683,6 +1110,7 @@ def create_beneficiary():
 
 
 @app.patch("/api/beneficiaries/<ben_id>")
+@authenticated_required
 def update_beneficiary(ben_id):
     item = my_beneficiary(ben_id, current_user())
     if not item:
@@ -701,6 +1129,7 @@ def update_beneficiary(ben_id):
 
 
 @app.delete("/api/beneficiaries/<ben_id>")
+@authenticated_required
 def delete_beneficiary(ben_id):
     item = my_beneficiary(ben_id, current_user())
     if not item:
@@ -713,6 +1142,7 @@ def delete_beneficiary(ben_id):
 
 
 @app.post("/api/cards/request")
+@authenticated_required
 def request_card():
     user = current_user()
     if not user.customer_id:
@@ -756,6 +1186,7 @@ def request_card():
 
 
 @app.get("/api/insights/spending")
+@authenticated_required
 def spending():
     user = current_user()
     account_id = request.args.get("accountId")
@@ -859,12 +1290,85 @@ def login():
 
     user = AppUser.query.filter_by(username=email).first()
     if not user or not user.is_active or not check_password(user.password_hash, password):
+        now = utcnow()
+        window_start = now - timedelta(minutes=5)
+        failures = AuditLog.query.filter(
+            AuditLog.action == "LOGIN_FAILED",
+            AuditLog.created_at >= window_start,
+        ).all()
+        account_failures = 1
+        ip_failures = 1
+        ip_address = request.remote_addr
+        for failure in failures:
+            details = failure.details or {}
+            if details.get("accountKey") == email:
+                account_failures += 1
+            if ip_address and details.get("ipAddress") == ip_address:
+                ip_failures += 1
+        repeated_failures = max(account_failures, ip_failures)
+        log_audit(
+            "LOGIN_FAILED",
+            "AUTH",
+            actor_user_id=None,
+            severity="WARN" if repeated_failures >= 5 else "INFO",
+            details={
+                "accountKey": email,
+                "attemptedUserId": str(user.user_id) if user else None,
+                "ipAddress": ip_address,
+                "failureCount": repeated_failures,
+            },
+        )
+        if repeated_failures == 5:
+            log_audit(
+                "FAILED_LOGIN_SPIKE",
+                "AUTH",
+                actor_user_id=None,
+                severity="WARN",
+                details={
+                    "accountKey": email,
+                    "attemptedUserId": str(user.user_id) if user else None,
+                    "ipAddress": ip_address,
+                    "failureCount": repeated_failures,
+                    "windowMinutes": 5,
+                },
+            )
+        db.session.commit()
         return error("Invalid email or password.", 401, "invalid_credentials")
 
     user.last_login_at = utcnow()
     db.session.commit()
 
     return jsonify({"user": user.to_dict(), "token": make_token(user)})
+
+
+@app.post("/api/auth/reset-password")
+def reset_password():
+    data = body()
+    token = str(data.get("token") or "")
+    password = str(data.get("password") or "")
+    if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
+        return error("Password needs 8+ characters with a letter and a number.", 400, "weak_password")
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    reset = PasswordResetToken.query.filter_by(token_hash=token_hash).with_for_update().first()
+    if not reset or reset.expires_at <= utcnow():
+        return error("This password reset link is invalid or expired.", 400, "invalid_reset_token")
+
+    user = db.session.get(AppUser, reset.user_id)
+    if not user or not user.is_active:
+        return error("This password reset link is invalid or expired.", 400, "invalid_reset_token")
+
+    user.password_hash = hash_password(password)
+    user.auth_token_version += 1
+    db.session.delete(reset)
+    log_audit(
+        "PASSWORD_RESET_COMPLETED",
+        "APP_USER",
+        entity_id=user.user_id,
+        actor_user_id=user.user_id,
+    )
+    db.session.commit()
+    return jsonify({"message": "Password updated."})
 
 
 
@@ -957,8 +1461,9 @@ def add_demo_data():
     db.session.commit()
 
 
-with app.app_context():
-    add_demo_data()  
+if os.environ.get("SKIP_DEMO_SEED") != "1":
+    with app.app_context():
+        add_demo_data()
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=int(os.environ.get("GELLYBANK_BACKEND_PORT", "5000")))

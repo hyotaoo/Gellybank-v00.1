@@ -28,6 +28,14 @@ export interface CreateAccountInput {
   isPrimary?: boolean;
 }
 
+export interface AccountApplicationReceipt {
+  id: string;
+  accountType: AccountType;
+  label: string;
+  status: 'pending';
+  initialDeposit: number;
+}
+
 export interface UpdateAccountInput {
   label?: string;
   isPrimary?: boolean;
@@ -39,8 +47,8 @@ export const listAccounts = (signal?: AbortSignal): Promise<Account[]> =>
 export const getAccount = (id: string, signal?: AbortSignal): Promise<Account> =>
   apiRequest<Account>(`/accounts/${id}`, { signal });
 
-export const createAccount = (input: CreateAccountInput): Promise<Account> =>
-  apiRequest<Account>('/accounts', { method: 'POST', body: input });
+export const createAccount = (input: CreateAccountInput): Promise<AccountApplicationReceipt> =>
+  apiRequest<AccountApplicationReceipt>('/accounts', { method: 'POST', body: input });
 
 export const updateAccount = (id: string, input: UpdateAccountInput): Promise<Account> =>
   apiRequest<Account>(`/accounts/${id}`, { method: 'PATCH', body: input });

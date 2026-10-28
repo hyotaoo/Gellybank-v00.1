@@ -8,10 +8,10 @@ const HistoryPage = () => {
 
   return (
     <DashboardLayout title="History">
-      <div className="flex flex-1 flex-col gap-5 overflow-hidden">
+      <div className="flex flex-1 flex-col gap-5 pb-2 lg:overflow-hidden">
         <AccountSwitcher />
 
-        <section className="flex flex-1 flex-col gap-6 overflow-hidden rounded-[36px] border border-surface-line bg-surface-soft p-8">
+        <section className="flex flex-1 flex-col gap-6 rounded-[36px] border border-surface-line bg-surface-soft p-5 sm:p-8 lg:overflow-hidden">
           <div className="flex items-center justify-between">
             <h2 className="text-[20px] font-normal leading-[1.21] text-ink">
               {selectedAccount ? `${selectedAccount.label} transactions` : 'Transactions'}

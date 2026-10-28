@@ -18,10 +18,10 @@ const DashboardHeader = ({ title = 'Dashboard' }: DashboardHeaderProps) => {
     : '—';
 
   return (
-    <header className="flex h-[140px] flex-none items-center justify-between pl-[14px] pr-[30px] pt-[53px]">
-      <h1 className="text-[36px] font-semibold leading-none text-primary">{title}</h1>
+    <header className="flex flex-none flex-col gap-4 px-4 py-6 sm:px-6 md:flex-row md:items-center md:justify-between lg:h-[120px] lg:pl-[14px] lg:pr-[30px] lg:pt-[33px]">
+      <h1 className="text-[30px] font-semibold leading-none text-primary sm:text-[36px]">{title}</h1>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-3 sm:gap-6">
         <RequestCardButton />
 
         <button
@@ -32,14 +32,14 @@ const DashboardHeader = ({ title = 'Dashboard' }: DashboardHeaderProps) => {
           <BellIcon className="h-[33px] w-[33px]" />
         </button>
 
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           <img
             src={avatar}
             alt={USER_NAME}
             className="h-[61px] w-[61px] flex-none rounded-full border border-surface-input object-cover"
           />
-          <div className="flex flex-col">
-            <span className="text-[20px] font-semibold leading-[1.21] text-ink">{USER_NAME}</span>
+          <div className="hidden min-w-0 flex-col sm:flex">
+            <span className="truncate text-[20px] font-semibold leading-[1.21] text-ink">{USER_NAME}</span>
             <div className="flex items-center gap-1.5">
               <span className="text-[14px] leading-[1.21] text-muted">
                 Account No. {accountNumber}
