@@ -9,6 +9,7 @@ export interface Transaction {
   type: TransactionType;
   amount: number;
   currency: string;
+  balanceAfter?: number;
   note?: string;
   counterparty?: string;
   reference: string;

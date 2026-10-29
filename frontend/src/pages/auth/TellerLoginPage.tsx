@@ -47,7 +47,7 @@ const TellerLoginPage = () => {
           className="relative z-10 flex w-full max-w-[623px] flex-col justify-between gap-4 rounded-[36px] bg-surface-card px-6 py-8 sm:px-[54px] sm:py-[35px] lg:order-1 lg:flex-1 min-[1440px]:min-h-[352px]"
           onSubmit={(event) => {
             event.preventDefault();
-            navigate('/dashboard');
+            navigate('/teller/dashboard');
           }}
         >
           <h1 className="text-[24px] font-bold leading-[1.21]">Login</h1>

@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError } from '@/api/client';
 import { createTransaction } from '@/api/transactions';
+import type { Transaction } from '@/api/transactions';
 import AccountSelect from '@/components/dashboard/AccountSelect';
 import AmountField from '@/components/dashboard/AmountField';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import ReceiptModal from '@/components/dashboard/ReceiptModal';
 import Input from '@/components/common/Input';
 import Button from '@/components/common/Button';
 import { useAccounts } from '@/context/AccountContext';
@@ -19,6 +21,7 @@ const DepositPage = () => {
   const [note, setNote] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string>();
+  const [receipt, setReceipt] = useState<Transaction | null>(null);
 
   useEffect(() => {
     if (!accountId && selectedAccount) setAccountId(selectedAccount.id);
@@ -40,10 +43,16 @@ const DepositPage = () => {
     setStatus('loading');
     setMessage(undefined);
     try {
-      await createTransaction({ accountId, type: 'deposit', amount: parsedAmount, note: note.trim() || undefined });
+      const transaction = await createTransaction({
+        accountId,
+        type: 'deposit',
+        amount: parsedAmount,
+        note: note.trim() || undefined,
+      });
       await refresh();
       setStatus('success');
       setMessage(`${formatCurrency(parsedAmount, account?.currency)} deposited successfully.`);
+      setReceipt(transaction);
       setAmount('');
       setNote('');
     } catch (err) {
@@ -121,6 +130,9 @@ const DepositPage = () => {
           </div>
         </aside>
       </div>
+      {receipt && (
+        <ReceiptModal transaction={receipt} account={account} onClose={() => setReceipt(null)} />
+      )}
     </DashboardLayout>
   );
 };

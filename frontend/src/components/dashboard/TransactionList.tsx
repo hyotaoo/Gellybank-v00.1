@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '@/api/client';
 import { listTransactions } from '@/api/transactions';
 import type { Transaction } from '@/api/transactions';
+import ReceiptModal from '@/components/dashboard/ReceiptModal';
 import DepositIcon from '@/components/icons/DepositIcon';
 import HistoryIcon from '@/components/icons/HistoryIcon';
 import TransferIcon from '@/components/icons/TransferIcon';
 import WithdrawIcon from '@/components/icons/WithdrawIcon';
+import { useAccounts } from '@/context/AccountContext';
 import { formatCurrency, formatDateTime } from '@/utils/format';
 
 interface TransactionListProps {
@@ -29,7 +31,9 @@ const statusTone: Record<Transaction['status'], string> = {
 };
 
 const TransactionList = ({ accountId, currency, limit, className = '' }: TransactionListProps) => {
+  const { accounts } = useAccounts();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [receipt, setReceipt] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const controllerRef = useRef<AbortController>();
@@ -97,38 +101,57 @@ const TransactionList = ({ accountId, currency, limit, className = '' }: Transac
   const isPositive = (transaction: Transaction) => transaction.type === 'deposit';
   const formatAmount = (transaction: Transaction) =>
     formatCurrency(transaction.amount, transaction.currency || currency || 'PHP');
+  const receiptAccount = receipt
+    ? accounts.find((item) => item.id === receipt.accountId) ?? null
+    : null;
 
   return (
-    <ul className={`flex flex-col gap-3 overflow-y-auto pr-1 ${className}`}>
-      {transactions.map((transaction) => (
-        <li key={transaction.id} className="flex items-center gap-4 rounded-[20px] bg-white p-4">
-          <span className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-surface-card text-primary">
-            {typeIcon[transaction.type]}
-          </span>
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-[15px] font-semibold leading-[1.21] text-ink">
-              {transaction.note || transaction.counterparty || transaction.type}
-            </span>
-            <span className="text-[13px] leading-[1.21] text-muted">
-              {formatDateTime(transaction.createdAt)} · {transaction.reference}
-            </span>
-          </div>
-          <div className="flex flex-col items-end">
-            <span
-              className={`text-[15px] font-semibold leading-[1.21] ${
-                isPositive(transaction) ? 'text-emerald-600' : 'text-ink'
-              }`}
+    <>
+      <ul className={`flex flex-col gap-3 overflow-y-auto pr-1 ${className}`}>
+        {transactions.map((transaction) => (
+          <li key={transaction.id}>
+            <button
+              type="button"
+              onClick={() => setReceipt(transaction)}
+              title="View receipt"
+              className="flex w-full items-center gap-4 rounded-[20px] bg-white p-4 text-left transition-colors hover:bg-surface-card focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover"
             >
-              {isPositive(transaction) ? '+' : '−'}
-              {formatAmount(transaction)}
-            </span>
-            <span className={`text-[12px] leading-[1.21] ${statusTone[transaction.status]}`}>
-              {transaction.status}
-            </span>
-          </div>
-        </li>
-      ))}
-    </ul>
+              <span className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-surface-card text-primary">
+                {typeIcon[transaction.type]}
+              </span>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-[15px] font-semibold leading-[1.21] text-ink">
+                  {transaction.note || transaction.counterparty || transaction.type}
+                </span>
+                <span className="text-[13px] leading-[1.21] text-muted">
+                  {formatDateTime(transaction.createdAt)} · {transaction.reference}
+                </span>
+              </div>
+              <div className="flex flex-col items-end">
+                <span
+                  className={`text-[15px] font-semibold leading-[1.21] ${
+                    isPositive(transaction) ? 'text-emerald-600' : 'text-ink'
+                  }`}
+                >
+                  {isPositive(transaction) ? '+' : '−'}
+                  {formatAmount(transaction)}
+                </span>
+                <span className={`text-[12px] leading-[1.21] ${statusTone[transaction.status]}`}>
+                  {transaction.status}
+                </span>
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {receipt && (
+        <ReceiptModal
+          transaction={receipt}
+          account={receiptAccount}
+          onClose={() => setReceipt(null)}
+        />
+      )}
+    </>
   );
 };
 

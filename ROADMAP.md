@@ -24,6 +24,8 @@ read your statement.
 | Frontend auth | ✅ Customer and admin sign-in use the API and persist bearer tokens |
 | Accounts | ✅ List / close are wired up; new account requests now enter the admin approval queue |
 | Transactions | ✅ Deposit, withdraw, transfer, and statement history are wired up |
+| Receipts | ✅ Every deposit, withdrawal, and transfer opens a printable receipt; history rows reopen it |
+| Portal dashboards | ⚠️ Admin and teller dashboards use local preview data so they run without the backend |
 | Admin operations | ✅ Overview, user controls, application decisions, and read-only audit logs |
 | Beneficiaries | ⚠️ Read-only in the UI — there is no screen to add, edit, or delete one |
 | Cards | ⚠️ Request only — there is no screen to list or block a card |
@@ -150,7 +152,7 @@ enforced by Flask decorators, not just by the frontend.
 | `DELETE` | `/api/beneficiaries/<id>` | Yes | ❌ unused |
 | `POST` | `/api/cards/request` | Yes | ✅ `RequestCardButton` |
 | `GET` | `/api/insights/spending` | Yes | ❌ unused |
-| `GET` | `/api/admin/dashboard` | Admin | ✅ Admin overview |
+| `GET` | `/api/admin/dashboard` | Admin | ❌ Static admin dashboard preview |
 | `GET` | `/api/admin/users` | Admin | ✅ Search system users |
 | `PATCH` | `/api/admin/users/<id>` | Admin | ✅ Change role or active status |
 | `POST` | `/api/admin/users/<id>/password-reset` | Admin | ✅ Issue one-use reset link |
@@ -165,7 +167,9 @@ enforced by Flask decorators, not just by the frontend.
 | `/` | `LoginPage` | Welcome screen |
 | `/login` | `SignInPage` | Customer sign-in |
 | `/admin/login` | `AdminLoginPage` | Figma Admin Sign In; accepts only administrators |
-| `/admin/dashboard` | `AdminDashboardPage` | System metrics and quick actions |
+| `/admin/dashboard` | `AdminDashboardPage` | Static preview; no backend required |
+| `/teller/login` | `TellerLoginPage` | Opens the teller dashboard without a backend |
+| `/teller/dashboard` | `TellerDashboardPage` | Static preview; no backend required |
 | `/admin/users` | `AdminUsersPage` | Role/status management and password reset links |
 | `/admin/applications` | `AdminApplicationsPage` | Approve/reject account requests |
 | `/admin/logs` | `AdminLogsPage` | Searchable severity/actor-filtered audit events |
@@ -180,7 +184,8 @@ enforced by Flask decorators, not just by the frontend.
 | `/dashboard/insights` | `PlaceholderPage` | Not built yet |
 | `/dashboard/profile` | `PlaceholderPage` | Not built yet |
 
-The admin frontend route is guarded by a protected metrics request, and every
+The admin and teller dashboard routes render static preview data and do not
+require the backend. Admin management routes still call the API, and every
 admin API route checks the bearer token and exact admin role. Customer page
 routes still have no frontend route guard, but their banking API requests
 require a valid token.
@@ -247,9 +252,12 @@ issues are still observable in the current code.
    flow remains a prototype and does not yet create users through
    `/api/auth/register`.
 
-3. **Partially resolved — admin routes are guarded.** Customer dashboard routes
-   still lack a client-side route guard; their API data requests now require
-   bearer authentication.
+3. **Partially resolved — admin APIs are guarded.** Admin API routes require an
+   active `ADMIN` token. The admin and teller dashboard preview routes are
+   intentionally unguarded so they render without the backend; admin management
+   screens still require API authentication. Customer dashboard routes have no
+   client-side route guard, but their API data requests require bearer
+   authentication.
 
 4. **CORS is wide open.** `backend/app.py:39` calls `CORS(app)` with no origin
    list, so any site in a browser can call this API.
@@ -286,10 +294,10 @@ issues are still observable in the current code.
     `db/schema.sql`, `backend/README.md`, `app_detailed.py`, and `dev.py` are
     all untracked. A fresh clone of the repository cannot be installed or run.
 
-11. **Limited tests, no linter, no CI.** Focused admin/auth backend tests cover
-    role boundaries, applications, password resets, and audit events. Existing
-    deposit, withdrawal, transfer, and broader frontend behavior still need
-    dedicated test coverage.
+11. **Limited tests, no linter, no CI.** Focused admin/auth and transaction
+    receipt backend tests cover role boundaries, applications, password resets,
+    audit events, and receipt balances. Existing broader frontend behavior still
+    needs dedicated test coverage.
 
 12. **macOS note for the setup script.** `cryptography==50.0.2` only ships
     prebuilt wheels for Apple Silicon, so an Intel Mac would try to compile it

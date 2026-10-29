@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError } from '@/api/client';
 import { createTransfer } from '@/api/transactions';
+import type { Transaction } from '@/api/transactions';
 import { listBeneficiaries } from '@/api/beneficiaries';
 import type { Beneficiary } from '@/api/beneficiaries';
 import AccountSelect from '@/components/dashboard/AccountSelect';
 import AmountField from '@/components/dashboard/AmountField';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import ReceiptModal from '@/components/dashboard/ReceiptModal';
 import Select from '@/components/common/Select';
 import Input from '@/components/common/Input';
 import Button from '@/components/common/Button';
@@ -27,6 +29,7 @@ const TransferPage = () => {
   const [note, setNote] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string>();
+  const [receipt, setReceipt] = useState<Transaction | null>(null);
   const controllerRef = useRef<AbortController>();
 
   useEffect(() => {
@@ -86,7 +89,7 @@ const TransferPage = () => {
     setStatus('loading');
     setMessage(undefined);
     try {
-      await createTransfer({
+      const transaction = await createTransfer({
         sourceAccountId: sourceId,
         amount: parsedAmount,
         note: note.trim() || undefined,
@@ -96,6 +99,7 @@ const TransferPage = () => {
       await refresh();
       setStatus('success');
       setMessage(`${formatCurrency(parsedAmount, sourceAccount?.currency)} transferred successfully.`);
+      setReceipt(transaction);
       setAmount('');
       setNote('');
       setDestinationId('');
@@ -229,6 +233,13 @@ const TransferPage = () => {
           </div>
         </aside>
       </div>
+      {receipt && (
+        <ReceiptModal
+          transaction={receipt}
+          account={sourceAccount}
+          onClose={() => setReceipt(null)}
+        />
+      )}
     </DashboardLayout>
   );
 };

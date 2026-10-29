@@ -6,10 +6,12 @@ import AdminLoginPage from './pages/auth/AdminLoginPage';
 import SignUpPage from './pages/auth/SignUpPage';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import AdminLayout from './components/admin/AdminLayout';
+import TellerLayout from './components/teller/TellerLayout';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminUsersPage from './pages/admin/AdminUsersPage';
 import AdminApplicationsPage from './pages/admin/AdminApplicationsPage';
 import AdminLogsPage from './pages/admin/AdminLogsPage';
+import TellerDashboardPage from './pages/teller/TellerDashboardPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
 import AccountsPage from './pages/dashboard/AccountsPage';
 import DepositPage from './pages/dashboard/DepositPage';
@@ -42,6 +44,11 @@ function App() {
           <Route path="users" element={<AdminUsersPage />} />
           <Route path="applications" element={<AdminApplicationsPage />} />
           <Route path="logs" element={<AdminLogsPage />} />
+        </Route>
+
+        <Route path="/teller" element={<TellerLayout />}>
+          <Route index element={<Navigate to="/teller/dashboard" replace />} />
+          <Route path="dashboard" element={<TellerDashboardPage />} />
         </Route>
 
         <Route element={<AccountLayout />}>

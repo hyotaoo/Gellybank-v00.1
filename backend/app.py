@@ -352,6 +352,7 @@ class Transaction(db.Model):
             "type": self.app_type,
             "amount": as_number(self.amount),
             "currency": DEFAULT_CURRENCY,
+            "balanceAfter": as_number(self.balance_after),
             "note": self.description,
             "counterparty": self.counterparty,
             "reference": self.reference_code,
