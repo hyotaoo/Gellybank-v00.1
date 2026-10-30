@@ -11,7 +11,6 @@ Only requires Python to be pre-installed.
 from __future__ import annotations
 
 import argparse
-import getpass
 import importlib
 import json
 import os
@@ -26,6 +25,7 @@ import sys
 import threading
 import time
 import urllib.error
+from urllib.parse import quote, unquote
 import urllib.request
 from pathlib import Path
 
@@ -36,6 +36,9 @@ VENV = BACKEND / "venv"
 ENV_FILE = BACKEND / ".env"
 FRONTEND_ENV_FILE = FRONTEND / ".env"
 SCHEMA_FILE = BACKEND / "db" / "schema.sql"
+ADMIN_MIGRATION_FILE = BACKEND / "db" / "migrations" / "001_admin_operations.sql"
+BENEFICIARIES_MIGRATION_FILE = BACKEND / "db" / "migrations" / "002_beneficiaries.sql"
+LEGACY_COLUMNS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "003_legacy_model_columns.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 
 DB_NAME = os.environ.get("GELLYBANK_DB_NAME", "gellybank_db")
@@ -48,8 +51,8 @@ BACKEND_PORT = int(os.environ.get("GELLYBANK_BACKEND_PORT", "5000"))
 FRONTEND_PORT = int(os.environ.get("GELLYBANK_FRONTEND_PORT", "5173"))
 
 REQUIRED_MODULES = ("flask", "flask_cors", "flask_sqlalchemy", "pymysql", "dotenv")
-PASSWORD_PATTERN = re.compile(r"^[A-Za-z0-9._~!+=,-]{8,64}$")
-PASSWORD_HINT = "Use letters, digits and . _ ~ ! + = , -"
+PASSWORD_PATTERN = re.compile(r"[^\r\n]{1,128}")
+PASSWORD_HINT = "Use 1-128 characters on a single line"
 
 # Exit codes used by the database helper that runs inside the virtual env.
 DB_SETUP_OK = 0
@@ -61,6 +64,7 @@ DB_SETUP_MISSING_PACKAGE = 4
 ADMIN_ERROR_CODES = (1044, 1045, 1049, 1142, 1698)
 
 PROCESSES: dict[str, subprocess.Popen] = {}
+SERVERS = ("backend", "frontend")
 LOG_LOCK = threading.Lock()
 
 DB_CHECK_CODE = """
@@ -82,10 +86,37 @@ try:
     cursor = connection.cursor()
     cursor.execute("SHOW TABLES")
     tables = {row[0] for row in cursor.fetchall()}
-    connection.close()
 except Exception:
     sys.exit(4)
-sys.exit(0 if {"app_users", "bank_accounts"}.issubset(tables) else 3)
+if not {"app_users", "bank_accounts"}.issubset(tables):
+    connection.close()
+    sys.exit(3)
+try:
+    cursor.execute("SHOW COLUMNS FROM app_users")
+    user_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM audit_logs")
+    audit_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM transactions")
+    transaction_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM account_applications")
+    application_columns = {row[0] for row in cursor.fetchall()}
+except Exception:
+    connection.close()
+    sys.exit(5)
+connection.close()
+required_tables = {
+    "account_applications",
+    "password_reset_tokens",
+    "beneficiaries",
+}
+admin_schema_ready = (
+    required_tables.issubset(tables)
+    and "auth_token_version" in user_columns
+    and "severity" in audit_columns
+    and "status" in transaction_columns
+    and "created_account_id" in application_columns
+)
+sys.exit(0 if admin_schema_ready else 5)
 """
 
 
@@ -192,7 +223,7 @@ def parse_db_url(url: str) -> dict:
     parts = match.groupdict()
     return {
         "user": parts["user"],
-        "password": parts["password"],
+        "password": unquote(parts["password"]),
         "host": parts["host"],
         "port": int(parts["port"] or 3306),
         "database": parts["database"],
@@ -219,13 +250,17 @@ def env_written() -> bool:
 
 
 def database_ready() -> bool:
+    return database_check_code() == 0
+
+
+def database_check_code() -> int:
     url = read_env_file().get("DATABASE_URL")
     if not url or not venv_exists():
-        return False
+        return 4
     try:
         parts = parse_db_url(url)
     except ValueError:
-        return False
+        return 4
     environment = dict(os.environ)
     environment.update(
         {
@@ -244,25 +279,30 @@ def database_ready() -> bool:
             text=True,
             timeout=30,
         )
-        return result.returncode == 0
+        return result.returncode
     except (OSError, subprocess.SubprocessError):
-        return False
+        return 4
 
 
 def valid_app_password(password: str) -> bool:
-    return bool(PASSWORD_PATTERN.match(password))
+    return bool(PASSWORD_PATTERN.fullmatch(password))
 
 
 def generate_app_password() -> str:
     return secrets.token_urlsafe(15)
 
 
-def write_env(app_password: str) -> bool:
-    secret_key = secrets.token_urlsafe(48)
-    url = f"mysql+pymysql://{DB_USER}:{app_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+def write_env(app_password: str, user: str | None = None) -> bool:
+    account = user or DB_USER
+    existing = read_env_file()
+    secret_key = existing.get("SECRET_KEY", "")
+    if not secret_key or "change-this" in secret_key:
+        secret_key = secrets.token_urlsafe(48)
+    encoded_password = quote(app_password, safe="")
+    url = f"mysql+pymysql://{account}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     content = (
         "# Written by dev.py.\n"
-        f"# The app connects to MySQL as '{DB_USER}' ({DB_NAME} database).\n"
+        f"# The app connects to MySQL as '{account}' ({DB_NAME} database).\n"
         "# SECRET_KEY signs the login tokens. Keep this file private.\n"
         f"DATABASE_URL={url}\n"
         f"SECRET_KEY={secret_key}\n"
@@ -279,7 +319,7 @@ def write_env(app_password: str) -> bool:
 def write_frontend_env() -> bool:
     if FRONTEND_ENV_FILE.exists():
         return False
-    content = f"VITE_API_BASE_URL=http://localhost:{BACKEND_PORT}/api\n"
+    content = f"VITE_API_BASE_URL=http://127.0.0.1:{BACKEND_PORT}/api\n"
     try:
         FRONTEND_ENV_FILE.write_text(content, encoding="utf-8")
         log_line(f"Wrote {relative(FRONTEND_ENV_FILE)}")
@@ -317,6 +357,13 @@ def npm_version() -> str | None:
 def show_status() -> None:
     print("")
     print("  Status")
+    database_check = database_check_code()
+    if database_check == 0:
+        database_detail, database_state = f"{env_database_name()} ready", "ok"
+    elif database_check == 5:
+        database_detail, database_state = f"{env_database_name()} needs schema migration", "missing"
+    else:
+        database_detail, database_state = f"{env_database_name()} not ready", "missing"
     checks = [
         ("Python", f"{platform.python_version()} ({platform.system()})", "ok"),
         ("Node.js", node_version() or "not found", "ok" if node_version() else "missing"),
@@ -325,7 +372,7 @@ def show_status() -> None:
         ("Virtual env", relative(VENV) if venv_exists() else "not created", "ok" if venv_exists() else "missing"),
         ("Python packages", "installed" if packages_installed() else "not installed", "ok" if packages_installed() else "missing"),
         ("backend/.env", "written" if env_written() else "not written", "ok" if env_written() else "missing"),
-        ("MySQL database", f"{env_database_name()} ready" if database_ready() else f"{env_database_name()} not ready", "ok" if database_ready() else "missing"),
+        ("MySQL database", database_detail, database_state),
         ("Frontend packages", "installed" if node_modules_ready() else "not installed", "ok" if node_modules_ready() else "missing"),
     ]
     for name, detail, state in checks:
@@ -622,6 +669,160 @@ def app_requirements() -> dict[str, set[str]]:
     return requirements
 
 
+def _migration_statement_exists(cursor, statement: str) -> bool:
+    """Return True when a migration statement targets something already present."""
+    alter = re.match(
+        r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+ADD\s+COLUMN\s+`?(\w+)`?",
+        statement,
+        re.IGNORECASE,
+    )
+    if alter:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            (alter.group(1), alter.group(2)),
+        )
+        return cursor.fetchone() is not None
+
+    constraint = re.match(
+        r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+ADD\s+CONSTRAINT\s+`?(\w+)`?",
+        statement,
+        re.IGNORECASE,
+    )
+    if constraint:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.TABLE_CONSTRAINTS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND CONSTRAINT_NAME = %s",
+            (constraint.group(1), constraint.group(2)),
+        )
+        return cursor.fetchone() is not None
+
+    create_table = re.match(
+        r"^\s*CREATE\s+TABLE\s+`?(\w+)`?",
+        statement,
+        re.IGNORECASE,
+    )
+    if create_table:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
+            (create_table.group(1),),
+        )
+        return cursor.fetchone() is not None
+
+    create_index = re.match(
+        r"^\s*CREATE\s+INDEX\s+`?(\w+)`?\s+ON\s+`?(\w+)`?",
+        statement,
+        re.IGNORECASE,
+    )
+    if create_index:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s",
+            (create_index.group(2), create_index.group(1)),
+        )
+        return cursor.fetchone() is not None
+    return False
+
+
+def _run_schema_migrations(connection) -> bool:
+    applied = 0
+    with connection.cursor() as cursor:
+        for migration_file in (
+            ADMIN_MIGRATION_FILE,
+            BENEFICIARIES_MIGRATION_FILE,
+            LEGACY_COLUMNS_MIGRATION_FILE,
+        ):
+            if not migration_file.exists():
+                log_line(f"{relative(migration_file)} is missing.")
+                return False
+            try:
+                script = migration_file.read_text(encoding="utf-8")
+            except OSError as exc:
+                log_line(f"Could not read {relative(migration_file)}: {exc}")
+                return False
+            statements = [
+                statement
+                for statement in split_sql_statements(script)
+                if not re.match(r"^\s*USE\s+", statement, re.IGNORECASE)
+            ]
+            log_line(f"Checking {relative(migration_file)} ...")
+            for number, statement in enumerate(statements, start=1):
+                if _migration_statement_exists(cursor, statement):
+                    continue
+                try:
+                    cursor.execute(statement)
+                    applied += 1
+                except Exception as exc:
+                    log_line(f"Migration statement {number} failed: {exc}")
+                    log_line("  " + " ".join(statement.split())[:300])
+                    return False
+    log_line(f"Schema migrations checked ({applied} statements applied).")
+    return True
+
+
+def _apply_schema_migrations() -> bool:
+    url = read_env_file().get("DATABASE_URL")
+    if not url:
+        log_line("No DATABASE_URL found; configure backend/.env first.")
+        return False
+    try:
+        parts = parse_db_url(url)
+    except ValueError as exc:
+        log_line(f"Could not read database configuration: {exc}")
+        return False
+    try:
+        import pymysql
+        connection = pymysql.connect(
+            host=parts["host"],
+            port=parts["port"],
+            user=parts["user"],
+            password=parts["password"],
+            database=parts["database"],
+            charset="utf8mb4",
+            connect_timeout=8,
+            autocommit=True,
+        )
+    except Exception as exc:
+        log_line(f"Could not connect to the configured database user: {exc}")
+        log_line("Apply backend/db/migrations/001_admin_operations.sql manually.")
+        return False
+    try:
+        return _run_schema_migrations(connection)
+    finally:
+        connection.close()
+
+
+def apply_schema_migrations() -> bool:
+    if not venv_exists():
+        log_line("Create and install the project virtual environment first.")
+        return False
+    if Path(sys.executable).resolve() == venv_python().resolve():
+        return _apply_schema_migrations()
+
+    command = [
+        str(venv_python()),
+        str(ROOT / "dev.py"),
+        "--internal-schema-migration",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log_line(f"Could not run schema migrations: {exc}")
+        return False
+    if result.stdout.strip():
+        log_line(result.stdout.strip())
+    if result.stderr.strip():
+        log_line(result.stderr.strip())
+    return result.returncode == 0
+
+
 # ----------------------------------------------------------------------
 # MySQL helpers
 #
@@ -904,46 +1105,139 @@ def run_db_helper(payload: dict) -> int:
 
 
 def prompt_password(prompt: str) -> str:
-    """Ask for a password without echoing it.
+    """Ask for a password, echoing one '*' per character.
 
-    Falls back to reading a plain line when stdin is not a terminal: on
-    Windows getpass reads straight from the console, so it would wait
-    forever when the tool is driven from a pipe.
+    Falls back to a plain line when stdin is not a terminal (a pipe cannot
+    be masked).
     """
     try:
         interactive = sys.stdin is not None and sys.stdin.isatty()
     except Exception:
         interactive = False
-    if interactive:
-        return getpass.getpass(prompt)
+    if not interactive:
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+        try:
+            return sys.stdin.readline().rstrip("\r\n")
+        except Exception:
+            return ""
+
     sys.stdout.write(prompt)
     sys.stdout.flush()
+    characters: list[str] = []
+
+    def erase_last() -> None:
+        if characters:
+            characters.pop()
+            sys.stdout.write("\b \b")
+            sys.stdout.flush()
+
     try:
-        return sys.stdin.readline().rstrip("\r\n")
-    except Exception:
-        return ""
+        if os.name == "nt":
+            import msvcrt
+
+            while True:
+                character = msvcrt.getwch()
+                if character in ("\r", "\n"):
+                    break
+                if character == "\x03":
+                    raise KeyboardInterrupt
+                if character == "\x08":
+                    erase_last()
+                elif character in ("\x00", "\xe0"):
+                    msvcrt.getwch()
+                else:
+                    characters.append(character)
+                    sys.stdout.write("*")
+                    sys.stdout.flush()
+        else:
+            import termios
+            import tty
+
+            descriptor = sys.stdin.fileno()
+            previous = termios.tcgetattr(descriptor)
+            try:
+                tty.setraw(descriptor)
+                while True:
+                    character = sys.stdin.read(1)
+                    if character in ("\r", "\n"):
+                        break
+                    if character == "\x03":
+                        raise KeyboardInterrupt
+                    if character in ("\x7f", "\x08"):
+                        erase_last()
+                    else:
+                        characters.append(character)
+                        sys.stdout.write("*")
+                        sys.stdout.flush()
+            finally:
+                termios.tcsetattr(descriptor, termios.TCSADRAIN, previous)
+    finally:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    return "".join(characters)
 
 
-def setup_database() -> bool:
-    if not env_written():
+def prompt_credentials(default_user: str, current_password: str = "") -> tuple[str, str]:
+    """Ask for a MySQL user and a masked password."""
+    user = input(f"  MySQL user [{default_user}]: ").strip() or default_user
+    while True:
+        prompt = f"  Password for '{user}'"
+        if current_password and user == default_user:
+            prompt += " (Enter keeps current)"
+        password = prompt_password(prompt + ": ")
+        if not password and current_password and user == default_user:
+            return user, current_password
+        if valid_app_password(password):
+            return user, password
+        print(f"Invalid password. {PASSWORD_HINT}")
+
+
+def setup_database(update_credentials: bool = True) -> bool:
+    """Configure backend/.env and make sure the MySQL schema is ready."""
+    existing_values = read_env_file()
+    existing_parts = None
+    if existing_values.get("DATABASE_URL"):
+        try:
+            existing_parts = parse_db_url(existing_values["DATABASE_URL"])
+        except ValueError:
+            existing_parts = None
+
+    if existing_parts is not None:
+        user = existing_parts["user"]
+        app_password = existing_parts.get("password", "")
+        if update_credentials:
+            print()
+            print(f"backend/.env already has MySQL user '{user}'.")
+            try:
+                answer = input("Update MySQL user/password? [y/n]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("")
+                return False
+            if answer in ("y", "yes"):
+                user, app_password = prompt_credentials(user, app_password)
+                if not write_env(app_password, user=user):
+                    return False
+    else:
         print()
-        while True:
-            app_password = prompt_password(f"Password for MySQL user '{DB_USER}' (8-64 chars): ")
-            if valid_app_password(app_password):
-                break
-            print(f"Invalid password. {PASSWORD_HINT}")
-        if not write_env(app_password):
+        user, app_password = prompt_credentials(DB_USER, "")
+        if not write_env(app_password, user=user):
             return False
-        write_frontend_env()
+    write_frontend_env()
 
-    values = read_env_file()
-    try:
-        parts = parse_db_url(values["DATABASE_URL"])
-    except Exception:
-        parts = {
-            "user": DB_USER, "password": "", "host": DB_HOST,
-            "port": DB_PORT, "database": DB_NAME,
-        }
+    parts = dict(existing_parts) if existing_parts else {
+        "user": DB_USER, "password": "", "host": DB_HOST,
+        "port": DB_PORT, "database": DB_NAME,
+    }
+    parts["user"] = user
+    parts["password"] = app_password
+
+    print()
+    if database_check_code() == 5:
+        apply_schema_migrations()
+    if database_ready():
+        print("Database is ready.")
+        return True
 
     payload = {
         "mode": "app",
@@ -955,31 +1249,33 @@ def setup_database() -> bool:
     }
     print()
     code = run_db_helper(payload)
-    if code == DB_SETUP_OK:
-        return True
-    if code != DB_SETUP_NEEDS_ADMIN:
+    if code == DB_SETUP_NEEDS_ADMIN:
+        print()
+        print("MySQL admin credentials are only needed when the database or the account")
+        print(f"'{parts['user']}' does not exist yet. They are used once and never saved.")
+        print("Press Enter to skip this step and set the database up by hand.")
+        admin_user = input(f"  Admin user [{DB_ADMIN_USER}]: ").strip() or DB_ADMIN_USER
+        admin_password = prompt_password("  Admin password: ")
+        if not admin_password:
+            print()
+            print("Skipping the admin step. To finish by hand:")
+            print("  1. Create the database and the account in MySQL Workbench:")
+            print(f"       CREATE DATABASE {parts['database']} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+            print(f"       CREATE USER '{parts['user']}'@'localhost' IDENTIFIED BY '<the password in backend/.env>';")
+            print(f"       GRANT ALL PRIVILEGES ON {parts['database']}.* TO '{parts['user']}'@'localhost';")
+            print("       FLUSH PRIVILEGES;")
+            print(f"  2. Run {relative(SCHEMA_FILE)} (it is safe to run more than once).")
+            print("  3. Run this tool again.")
+            return False
+        payload.update({"mode": "admin", "admin_user": admin_user, "admin_password": admin_password})
+        code = run_db_helper(payload)
+
+    if code != DB_SETUP_OK:
         print("Database setup failed. See the messages above.")
         return False
-
-    print()
-    print("MySQL admin credentials are only needed when the database or the account")
-    print(f"'{parts['user']}' does not exist yet. They are used once and never saved.")
-    print("Press Enter to skip this step and set the database up by hand.")
-    admin_user = input(f"  Admin user [{DB_ADMIN_USER}]: ").strip() or DB_ADMIN_USER
-    admin_password = prompt_password("  Admin password: ")
-    if not admin_password:
-        print()
-        print("Skipping the admin step. To finish by hand:")
-        print("  1. Create the database and the account in MySQL Workbench:")
-        print(f"       CREATE DATABASE {parts['database']} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
-        print(f"       CREATE USER '{parts['user']}'@'localhost' IDENTIFIED BY '<the password in backend/.env>';")
-        print(f"       GRANT ALL PRIVILEGES ON {parts['database']}.* TO '{parts['user']}'@'localhost';")
-        print("       FLUSH PRIVILEGES;")
-        print(f"  2. Run {relative(SCHEMA_FILE)} (it is safe to run more than once).")
-        print("  3. Run this tool again.")
-        return False
-    payload.update({"mode": "admin", "admin_user": admin_user, "admin_password": admin_password})
-    return run_db_helper(payload) == DB_SETUP_OK
+    if database_check_code() == 5:
+        apply_schema_migrations()
+    return database_ready()
 
 
 def spawn_options() -> dict:
@@ -1019,6 +1315,7 @@ def start_backend() -> subprocess.Popen | None:
         return None
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
+    env["GELLYBANK_BACKEND_PORT"] = str(BACKEND_PORT)
     log_line(f"Starting backend on http://localhost:{BACKEND_PORT} ...")
     try:
         process = subprocess.Popen(
@@ -1035,6 +1332,10 @@ def start_backend() -> subprocess.Popen | None:
 
 def start_frontend() -> subprocess.Popen | None:
     if port_in_use(FRONTEND_PORT):
+        status, _ = http_get(f"http://localhost:{FRONTEND_PORT}/", 1.5)
+        if status == 200:
+            log_line(f"Frontend already running on http://localhost:{FRONTEND_PORT}")
+            return None
         log_line(f"Port {FRONTEND_PORT} is in use by another process.")
         return None
     if not shutil.which("npm"):
@@ -1044,11 +1345,14 @@ def start_frontend() -> subprocess.Popen | None:
         log_line("Frontend packages not installed. Use option 5.")
         return None
     env = dict(os.environ)
-    env["VITE_API_BASE_URL"] = f"http://localhost:{BACKEND_PORT}/api"
+    env["VITE_API_BASE_URL"] = f"http://127.0.0.1:{BACKEND_PORT}/api"
     log_line(f"Starting frontend on http://localhost:{FRONTEND_PORT} ...")
     try:
         process = subprocess.Popen(
-            npm_command("run", "dev", "--", "--port", str(FRONTEND_PORT), "--strictPort"),
+            npm_command(
+                "run", "dev", "--", "--host", "127.0.0.1",
+                "--port", str(FRONTEND_PORT), "--strictPort",
+            ),
             cwd=str(FRONTEND), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1, **spawn_options(),
         )
@@ -1096,34 +1400,130 @@ def stop_all() -> None:
             stop_process(proc)
 
 
-def wait_for(url: str, timeout: float = 30.0) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+def is_our_server(port: int, kind: str) -> bool:
+    """Return True when the process on 'port' looks like one of our servers."""
+    if kind == "backend":
+        status, body = http_get(f"http://127.0.0.1:{port}/api/health", 1.5)
+        return status == 200 and "gellybank" in body.lower()
+    status, body = http_get(f"http://127.0.0.1:{port}/", 1.5)
+    lowered = body.lower()
+    return status == 200 and ('<div id="root"' in lowered or "vite" in lowered)
+
+
+def stop_by_port(port: int) -> bool:
+    """Kill whatever listens on 'port'. Only call after is_our_server()."""
+    if os.name == "nt":
+        try:
+            listing = subprocess.run(
+                ["netstat", "-ano", "-p", "tcp"],
+                capture_output=True, text=True, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        pids = set()
+        for line in listing.stdout.splitlines():
+            fields = line.split()
+            if (
+                len(fields) >= 5
+                and fields[1].endswith(f":{port}")
+                and fields[3].upper() == "LISTENING"
+            ):
+                pids.add(fields[4])
+        stopped = False
+        for pid in pids:
+            completed = subprocess.run(
+                ["taskkill", "/PID", pid, "/T", "/F"], capture_output=True
+            )
+            stopped = stopped or completed.returncode == 0
+        return stopped
+    try:
+        listing = subprocess.run(
+            ["lsof", "-ti", f"tcp:{port}"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    stopped = False
+    for line in listing.stdout.splitlines():
+        try:
+            os.kill(int(line.strip()), signal.SIGTERM)
+            stopped = True
+        except (OSError, ValueError):
+            continue
+    return stopped
+
+
+def restart_all(targets: tuple[str, ...] = SERVERS) -> bool:
+    """Stop and start the requested servers, even if dev.py did not start them."""
+    targets = tuple(targets)
+    ports = {"backend": BACKEND_PORT, "frontend": FRONTEND_PORT}
+    for name in targets:
+        process = PROCESSES.pop(name, None)
+        if process is not None:
+            log_line(f"Stopping {name} ...")
+            stop_process(process)
+    for name in targets:
+        port = ports[name]
+        deadline = time.monotonic() + 5.0
+        while port_in_use(port) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        if not port_in_use(port):
+            continue
+        if is_our_server(port, name):
+            log_line(f"Port {port} is still held by a stale {name}; stopping it ...")
+            stop_by_port(port)
+        else:
+            log_line(f"Port {port} is in use by an unrelated process; leaving it alone.")
+    return start_all(targets)
+
+
+def wait_for(
+    url: str,
+    timeout: float = 30.0,
+    process: subprocess.Popen | None = None,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process is not None and process.poll() is not None:
+            return False
         status, _ = http_get(url, 1.0)
-        if status is not None and status < 500:
+        if status != 200 and "127.0.0.1" in url:
+            status, _ = http_get(url.replace("127.0.0.1", "localhost"), 1.0)
+        if status == 200:
             return True
         time.sleep(0.3)
     return False
 
 
-def start_all() -> None:
-    if PROCESSES.get("backend") is None or PROCESSES["backend"].poll() is not None:
-        proc = start_backend()
-        if proc is not None:
-            PROCESSES["backend"] = proc
-    if PROCESSES.get("frontend") is None or PROCESSES["frontend"].poll() is not None:
-        proc = start_frontend()
-        if proc is not None:
-            PROCESSES["frontend"] = proc
-    if PROCESSES.get("backend"):
-        wait_for(f"http://127.0.0.1:{BACKEND_PORT}/api/health")
-    if PROCESSES.get("frontend"):
-        wait_for(f"http://localhost:{FRONTEND_PORT}/")
-    if PROCESSES.get("backend"):
-        print(f"  Backend:  http://localhost:{BACKEND_PORT}")
-    if PROCESSES.get("frontend"):
-        print(f"  Frontend: http://localhost:{FRONTEND_PORT}")
+def start_all(targets: tuple[str, ...] = SERVERS) -> bool:
+    for name in targets:
+        process = PROCESSES.get(name)
+        if process is None or process.poll() is not None:
+            started = start_backend() if name == "backend" else start_frontend()
+            if started is not None:
+                PROCESSES[name] = started
+
+    health = {
+        "backend": (f"http://127.0.0.1:{BACKEND_PORT}/api/health", "Backend", BACKEND_PORT),
+        "frontend": (f"http://127.0.0.1:{FRONTEND_PORT}/", "Frontend", FRONTEND_PORT),
+    }
+    results: dict[str, bool] = {}
+    for name in targets:
+        url, label, port = health[name]
+        process = PROCESSES.get(name)
+        ready = wait_for(url, timeout=30.0 if process else 1.0, process=process)
+        results[name] = ready
+        if ready:
+            print(f"  {label}: http://localhost:{port}")
+        else:
+            log_line(f"{label} did not become healthy.")
+            if process is not None:
+                PROCESSES.pop(name, None)
+                stop_process(process)
+    if not all(results.values()):
+        log_line("Startup incomplete; any healthy server remains running.")
     print("")
+    return all(results.values())
 
 
 def do_setup() -> bool:
@@ -1138,16 +1538,23 @@ def do_setup() -> bool:
     if not env_written():
         print()
         while True:
-            app_password = prompt_password(f"Password for MySQL user '{DB_USER}' (8-64 chars): ")
+            app_password = prompt_password(f"Password for MySQL user '{DB_USER}' (1-128 chars): ")
             if valid_app_password(app_password):
                 break
             print(f"Invalid password. {PASSWORD_HINT}")
         if not write_env(app_password):
             return False
         write_frontend_env()
-    if not database_ready():
-        if not setup_database():
+    database_check = database_check_code()
+    if database_check == 5:
+        if not apply_schema_migrations():
             return False
+    elif database_check != 0:
+        if not setup_database(update_credentials=False):
+            return False
+    if not database_ready():
+        log_line("Database setup finished, but the required schema is still not ready.")
+        return False
     if not node_modules_ready():
         if not npm_install():
             return False
@@ -1173,6 +1580,7 @@ def menu() -> int:
         print("  6) Start servers")
         print("  7) Stop servers")
         print("  8) Refresh status")
+        print("  R) Restart servers (refresh)")
         print("  9) Quit")
         print("")
         try:
@@ -1200,6 +1608,8 @@ def menu() -> int:
             stop_all()
         elif choice in ("8", "status", "refresh"):
             pass
+        elif choice in ("r", "restart", "reload"):
+            restart_all()
         else:
             print("  Unknown option.")
 
@@ -1208,8 +1618,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dev.py", description="Set up and run Gellybank locally.")
     parser.add_argument("--setup", action="store_true", help="set up everything and exit")
     parser.add_argument("--start", action="store_true", help="set up if needed, start servers, then exit")
-    parser.add_argument("--version", action="version", version="Gellybank dev tool 1.1.0")
+    parser.add_argument("--version", action="version", version="Gellybank dev tool 1.2.0")
     parser.add_argument("--internal-db-setup", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--internal-schema-migration", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     if args.internal_db_setup:
@@ -1224,6 +1635,9 @@ def main(argv: list[str] | None = None) -> int:
             log_line(f"The database helper failed: {exc}")
             return DB_SETUP_FAILED
 
+    if args.internal_schema_migration:
+        return 0 if _apply_schema_migrations() else 1
+
     if args.setup:
         return 0 if do_setup() else 1
 
@@ -1231,16 +1645,21 @@ def main(argv: list[str] | None = None) -> int:
         if not (venv_exists() and packages_installed() and env_written() and database_ready() and node_modules_ready()):
             if not do_setup():
                 return 1
-        start_all()
+        startup_ok = start_all()
+        if not PROCESSES:
+            return 0 if startup_ok else 1
         print("Press Ctrl+C to stop.")
+        runtime_ok = True
         try:
-            while True:
+            while PROCESSES:
                 time.sleep(1)
                 for name in list(PROCESSES.keys()):
                     proc = PROCESSES[name]
                     if proc.poll() is not None:
                         log_line(f"[{name}] exited")
                         PROCESSES.pop(name, None)
+                        runtime_ok = False
+            return 1 if not startup_ok or not runtime_ok else 0
         except KeyboardInterrupt:
             print("")
             stop_all()
