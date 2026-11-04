@@ -40,6 +40,7 @@ SCHEMA_FILE = BACKEND / "db" / "schema.sql"
 ADMIN_MIGRATION_FILE = BACKEND / "db" / "migrations" / "001_admin_operations.sql"
 BENEFICIARIES_MIGRATION_FILE = BACKEND / "db" / "migrations" / "002_beneficiaries.sql"
 LEGACY_COLUMNS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "003_legacy_model_columns.sql"
+CONSENT_MIGRATION_FILE = BACKEND / "db" / "migrations" / "004_consent_columns.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 
 DB_NAME = os.environ.get("GELLYBANK_DB_NAME", "gellybank_db")
@@ -602,6 +603,7 @@ def _run_schema_migrations(connection) -> bool:
             ADMIN_MIGRATION_FILE,
             BENEFICIARIES_MIGRATION_FILE,
             LEGACY_COLUMNS_MIGRATION_FILE,
+            CONSENT_MIGRATION_FILE,
         ):
             if not migration_file.exists():
                 log_line(f"{relative(migration_file)} is missing.")
@@ -797,6 +799,7 @@ def start_backend() -> subprocess.Popen | None:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     env["GELLYBANK_BACKEND_PORT"] = str(BACKEND_PORT)
+    env.setdefault("SEED_DEMO", "1")
     log_line(f"Starting backend on http://localhost:{BACKEND_PORT} ...")
     try:
         process = subprocess.Popen(
