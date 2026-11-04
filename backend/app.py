@@ -1433,6 +1433,14 @@ def create_transfer():
             return error("Destination account not found.", 404, "not_found")
         if destination.account_id == source.account_id:
             return error("Choose a different destination account.", 400, "same_account")
+    elif data.get("destinationAccountNumber"):
+        destination = BankAccount.query.filter_by(
+            account_number=str(data["destinationAccountNumber"]).strip()
+        ).first()
+        if not destination:
+            return error("Account number not found.", 404, "not_found")
+        if destination.account_id == source.account_id:
+            return error("Choose a different destination account.", 400, "same_account")
     else:
         beneficiary = Beneficiary.query.filter_by(
             beneficiary_id=as_int(data.get("beneficiaryId")),
@@ -1440,6 +1448,13 @@ def create_transfer():
         ).first()
         if not beneficiary:
             return error("Recipient not found.", 404, "not_found")
+        destination = BankAccount.query.filter_by(
+            account_number=beneficiary.account_number
+        ).first()
+        if not destination:
+            return error("Recipient account not found.", 404, "not_found")
+        if destination.account_id == source.account_id:
+            return error("Choose a different destination account.", 400, "same_account")
 
     note = (data.get("note") or "").strip() or None
     reference = new_reference()
@@ -1525,18 +1540,6 @@ def create_transfer():
                 category="TRANSACTION",
                 link="/dashboard/history",
             )
-        else:
-            beneficiary_account = BankAccount.query.filter_by(
-                account_number=beneficiary.account_number
-            ).first()
-            if beneficiary_account:
-                push_notification(
-                    notification_user_id(beneficiary_account.customer_id),
-                    "Money received",
-                    f"Transfer of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was received. Reference: {reference}.",
-                    category="TRANSACTION",
-                    link="/dashboard/history",
-                )
 
         db.session.commit()
     except Exception:

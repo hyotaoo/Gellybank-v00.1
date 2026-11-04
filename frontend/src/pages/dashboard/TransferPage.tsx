@@ -24,6 +24,7 @@ const TransferPage = () => {
   const [mode, setMode] = useState<Mode>('internal');
   const [destinationId, setDestinationId] = useState('');
   const [beneficiaryId, setBeneficiaryId] = useState('');
+  const [destinationAccountNumber, setDestinationAccountNumber] = useState('');
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');

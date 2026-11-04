@@ -29,6 +29,7 @@ export interface TransferInput {
   amount: number;
   note?: string;
   destinationAccountId?: string;
+  destinationAccountNumber?: string;
   beneficiaryId?: string;
 }
 
