@@ -323,12 +323,7 @@ const ProfilePage = () => {
                 className="h-[72px] w-[72px] text-[26px]"
               />
               <div className="flex min-w-0 flex-col gap-3">
-                <div>
-                  <SectionTitle>Profile photo</SectionTitle>
-                  <p className="mt-1 text-[13px] leading-[1.21] text-muted">
-                    Upload a PNG, JPG, or WebP image up to 20 MB. You can crop it before saving.
-                  </p>
-                </div>
+                <SectionTitle>Profile photo</SectionTitle>
                 <div className="flex flex-wrap gap-2">
                   <input
                     ref={avatarInputRef}
