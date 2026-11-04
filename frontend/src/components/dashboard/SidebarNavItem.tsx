@@ -8,25 +8,19 @@ interface SidebarNavItemProps {
   end?: boolean;
 }
 
+// Figma 45:921 — 331x56, r16, px20, gap20, 20px/400. The 4x34 indicator is hidden in Figma.
 const SidebarNavItem = ({ icon, label, to, end = false }: SidebarNavItemProps) => (
   <NavLink
     to={to}
     end={end}
     className={({ isActive }) =>
-      `relative flex h-[56px] items-center gap-5 overflow-hidden rounded-[16px] pl-5 pr-5 text-[20px] leading-[1.21] transition-colors ${
-        isActive ? 'bg-surface-card text-primary' : 'text-ink hover:bg-surface-card/60'
+      `relative flex h-14 w-full items-center gap-5 overflow-hidden rounded-[16px] px-5 text-[20px] leading-[24px] transition-colors ${
+        isActive ? 'bg-blush text-primary' : 'text-ink hover:bg-blush/50'
       }`
     }
   >
-    {({ isActive }) => (
-      <>
-        {isActive && (
-          <span className="absolute left-0 top-1/2 h-[34px] w-1 -translate-y-1/2 rounded-r-full bg-primary" />
-        )}
-        <span className="flex h-6 w-6 flex-none items-center justify-center">{icon}</span>
-        <span>{label}</span>
-      </>
-    )}
+    <span className="flex h-6 w-6 flex-none items-center justify-center">{icon}</span>
+    <span>{label}</span>
   </NavLink>
 );
 

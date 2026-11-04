@@ -116,6 +116,8 @@ admin_schema_ready = (
     and "status" in transaction_columns
     and "created_account_id" in application_columns
 )
+if not {"notifications", "customer_profiles"}.issubset(tables):
+    sys.exit(6)
 sys.exit(0 if admin_schema_ready else 5)
 """
 
@@ -148,7 +150,11 @@ def packages_installed() -> bool:
         return False
     try:
         result = subprocess.run(
-            [str(venv_python()), "-c", f"import {', '.join(REQUIRED_MODULES)}"],
+            [
+                str(venv_python()),
+                "-c",
+                "import importlib.util, sys; sys.exit(0 if all(importlib.util.find_spec(m) is not None for m in (" + ", ".join(repr(m) for m in REQUIRED_MODULES) + ")) else 1)",
+            ],
             capture_output=True,
             text=True,
             timeout=60,
@@ -362,6 +368,8 @@ def show_status() -> None:
         database_detail, database_state = f"{env_database_name()} ready", "ok"
     elif database_check == 5:
         database_detail, database_state = f"{env_database_name()} needs schema migration", "missing"
+    elif database_check == 6:
+        database_detail, database_state = f"{env_database_name()} needs updated schema", "missing"
     else:
         database_detail, database_state = f"{env_database_name()} not ready", "missing"
     checks = [
@@ -383,7 +391,7 @@ def show_status() -> None:
 
 def stream_command(command: list[str], prefix: str = "", cwd: Path | None = None, env: dict | None = None) -> bool:
     try:
-        process = subprocess.Popen(
+        with subprocess.Popen(
             command,
             cwd=str(cwd) if cwd else None,
             env=env,
@@ -393,20 +401,18 @@ def stream_command(command: list[str], prefix: str = "", cwd: Path | None = None
             encoding="utf-8",
             errors="replace",
             bufsize=1,
-        )
+        ) as process:
+            try:
+                for line in process.stdout:  # noqa
+                    line = line.rstrip()
+                    log_line(f"{prefix} {line}" if prefix else line)
+            finally:
+                # stdout closed automatically by Popen exit
+                pass
+            return process.wait() == 0
     except OSError as exc:
         log_line(f"{prefix} could not start: {exc}")
         return False
-    try:
-        for line in process.stdout:
-            line = line.rstrip()
-            log_line(f"{prefix} {line}" if prefix else line)
-    finally:
-        try:
-            process.stdout.close()
-        except Exception:
-            pass
-    return process.wait() == 0
 
 
 def create_venv() -> bool:
@@ -1118,7 +1124,8 @@ def prompt_password(prompt: str) -> str:
         sys.stdout.write(prompt)
         sys.stdout.flush()
         try:
-            return sys.stdin.readline().rstrip("\r\n")
+            line = sys.stdin.readline()  # noqa
+            return line.rstrip("\r\n") if line else ""
         except Exception:
             return ""
 
@@ -1287,15 +1294,10 @@ def spawn_options() -> dict:
 def pump_output(process: subprocess.Popen, name: str) -> None:
     def reader():
         try:
-            for line in process.stdout:
+            for line in process.stdout:  # noqa
                 log_line(f"[{name}] {line.rstrip()}")
         except Exception:
             pass
-        finally:
-            try:
-                process.stdout.close()
-            except Exception:
-                pass
     threading.Thread(target=reader, daemon=True).start()
 
 
@@ -1363,6 +1365,64 @@ def start_frontend() -> subprocess.Popen | None:
     return process
 
 
+DEMO_ENV_BACKUP = FRONTEND / ".env.bak"
+
+
+def start_demo() -> None:
+    log_line("Demo mode: backend not required. Pre-loaded demo data will be used.")
+    if not shutil.which("npm"):
+        log_line("npm not found. Install Node.js first.")
+        return
+    if not node_modules_ready():
+        log_line("Frontend packages not installed. Use option 5.")
+        return
+    # Backup original frontend .env
+    if FRONTEND_ENV_FILE.exists() and not DEMO_ENV_BACKUP.exists():
+        try:
+            FRONTEND_ENV_FILE.rename(DEMO_ENV_BACKUP)
+            log_line(f"Backed up {relative(FRONTEND_ENV_FILE)}")
+        except OSError as exc:
+            log_line(f"Could not back up {relative(FRONTEND_ENV_FILE)}: {exc}")
+    # Write demo env (pre-loaded info; frontend demo API handles all pages)
+    demo_env = (
+        f"VITE_DEMO_MODE=true\n"
+        f"VITE_API_BASE_URL=http://127.0.0.1:{BACKEND_PORT}/api\n"
+    )
+    try:
+        FRONTEND_ENV_FILE.write_text(demo_env, encoding="utf-8")
+        log_line(f"Wrote demo {relative(FRONTEND_ENV_FILE)} (VITE_DEMO_MODE=true)")
+    except OSError as exc:
+        log_line(f"Could not write demo env: {exc}")
+        return
+    # Start frontend only; skip backend/db/venv checks
+    if port_in_use(FRONTEND_PORT):
+        status, _ = http_get(f"http://localhost:{FRONTEND_PORT}/", 1.5)
+        if status == 200:
+            log_line(f"Frontend already running on http://localhost:{FRONTEND_PORT}")
+        else:
+            log_line(f"Port {FRONTEND_PORT} is in use by another process.")
+        return
+    env = dict(os.environ)
+    env["VITE_DEMO_MODE"] = "true"
+    env["VITE_API_BASE_URL"] = f"http://127.0.0.1:{BACKEND_PORT}/api"
+    log_line(f"Starting demo frontend on http://localhost:{FRONTEND_PORT} ...")
+    try:
+        process = subprocess.Popen(
+            npm_command(
+                "run", "dev", "--", "--host", "127.0.0.1",
+                "--port", str(FRONTEND_PORT), "--strictPort",
+            ),
+            cwd=str(FRONTEND), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", bufsize=1, **spawn_options(),
+        )
+    except OSError as exc:
+        log_line(f"Failed to start demo frontend: {exc}")
+        return
+    PROCESSES["frontend"] = process
+    pump_output(process, "frontend")
+    log_line("Demo mode active — every page is testable without the backend.")
+
+
 def stop_process(process: subprocess.Popen | None) -> None:
     if process is None or process.poll() is not None:
         return
@@ -1398,6 +1458,14 @@ def stop_all() -> None:
         if proc is not None:
             log_line(f"Stopping {name} ...")
             stop_process(proc)
+    # Restore original frontend .env if demo mode left a backup
+    if DEMO_ENV_BACKUP.exists() and FRONTEND_ENV_FILE.exists():
+        try:
+            FRONTEND_ENV_FILE.unlink()
+            DEMO_ENV_BACKUP.rename(FRONTEND_ENV_FILE)
+            log_line(f"Restored {relative(FRONTEND_ENV_FILE)} from demo backup")
+        except OSError as exc:
+            log_line(f"Could not restore {relative(FRONTEND_ENV_FILE)}: {exc}")
 
 
 def is_our_server(port: int, kind: str) -> bool:
@@ -1581,7 +1649,8 @@ def menu() -> int:
         print("  7) Stop servers")
         print("  8) Refresh status")
         print("  R) Restart servers (refresh)")
-        print("  9) Quit")
+        print("  D) Demo mode (frontend only, pre-loaded demo data)")
+        print("  Q) Quit")
         print("")
         try:
             choice = input("  > ").strip().lower()
@@ -1589,7 +1658,7 @@ def menu() -> int:
             print("")
             stop_all()
             return 0
-        if choice in ("q", "9", "quit", "exit"):
+        if choice in ("q", "quit", "exit"):
             stop_all()
             return 0
         elif choice in ("1", "setup", "all"):
@@ -1610,6 +1679,8 @@ def menu() -> int:
             pass
         elif choice in ("r", "restart", "reload"):
             restart_all()
+        elif choice in ("d", "demo", "demo mode"):
+            start_demo()
         else:
             print("  Unknown option.")
 

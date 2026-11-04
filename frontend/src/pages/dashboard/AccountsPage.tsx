@@ -43,7 +43,7 @@ const AccountsPage = () => {
 
   return (
     <DashboardLayout title="Accounts">
-      <div className="flex flex-1 flex-col gap-6 overflow-y-auto pr-1">
+      <div className="flex flex-1 flex-col gap-6 overflow-y-auto pb-6 pl-[14px] pr-[18px]">
         <OpenAccountForm />
 
         {message && (

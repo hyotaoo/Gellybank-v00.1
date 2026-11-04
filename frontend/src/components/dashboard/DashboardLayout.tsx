@@ -8,13 +8,14 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
+// Figma 2:56 — canvas 1440x1024, sidebar 363, main content 1077, content pad 0/14
 const DashboardLayout = ({ title, children }: DashboardLayoutProps) => {
   const scale = useFitScale();
 
   return (
-    <div className="flex h-[100dvh] w-full items-center justify-center overflow-hidden bg-[#FFFCF7] font-sans text-ink">
+    <div className="flex h-[100dvh] w-full items-center justify-center overflow-hidden bg-page font-sans text-ink">
       <div
-        className="relative flex shrink-0 overflow-hidden bg-[#FFFCF7]"
+        className="relative flex shrink-0 overflow-hidden bg-page"
         style={{
           width: DESIGN_WIDTH,
           height: DESIGN_HEIGHT,
@@ -24,9 +25,7 @@ const DashboardLayout = ({ title, children }: DashboardLayoutProps) => {
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col">
           <DashboardHeader title={title} />
-          <div className="flex flex-1 flex-col gap-[24px] overflow-hidden px-[14px] pb-6">
-            {children}
-          </div>
+          <div className="flex min-h-0 flex-1 flex-col">{children}</div>
         </main>
       </div>
     </div>

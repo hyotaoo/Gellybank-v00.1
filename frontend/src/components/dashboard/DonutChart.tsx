@@ -16,6 +16,7 @@ const gradient = (() => {
     .join(', ')})`;
 })();
 
+// Figma 66:346 — 100px donut, 16px gutter, legend rows at 16px/600
 const DonutChart = () => (
   <div className="flex items-center gap-4">
     <div
@@ -34,7 +35,7 @@ const DonutChart = () => (
             className="h-2.5 w-2.5 flex-none rounded-full"
             style={{ backgroundColor: color }}
           />
-          <span className="text-[14px] leading-[1.21] text-ink">{label}</span>
+          <span className="text-[16px] font-semibold leading-[19px] text-ink">{label}</span>
         </li>
       ))}
     </ul>

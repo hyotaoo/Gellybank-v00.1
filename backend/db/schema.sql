@@ -305,6 +305,126 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 
 -- ============================================================
+-- TABLE 10: NOTIFICATIONS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS notifications (
+    notification_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(120) NOT NULL,
+    message VARCHAR(500) NOT NULL,
+
+    kind VARCHAR(20) NOT NULL DEFAULT 'system',
+    href VARCHAR(255) NULL,
+
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    read_at DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    KEY idx_notifications_user_date (user_id, created_at),
+    KEY idx_notifications_user_read (user_id, is_read, created_at),
+
+    CONSTRAINT fk_notifications_user
+        FOREIGN KEY (user_id)
+        REFERENCES app_users(user_id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+
+-- ============================================================
+-- TABLE 11: CUSTOMER PROFILES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS customer_profiles (
+    profile_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_id BIGINT UNSIGNED NOT NULL,
+
+    suffix VARCHAR(10) NULL,
+    city VARCHAR(80) NULL,
+    state_region VARCHAR(80) NULL,
+    postal_code VARCHAR(20) NULL,
+    mailing_same VARCHAR(5) NULL,
+    citizenship VARCHAR(50) NULL,
+
+    employment_status VARCHAR(50) NULL,
+    occupation VARCHAR(100) NULL,
+    employer VARCHAR(120) NULL,
+    annual_income VARCHAR(50) NULL,
+    source_of_funds VARCHAR(50) NULL,
+
+    ownership_type VARCHAR(30) NULL,
+    purpose_of_account VARCHAR(60) NULL,
+    agree_insights BOOLEAN NOT NULL DEFAULT FALSE,
+
+    email_verified_at DATETIME NULL,
+    terms_accepted_at DATETIME NULL,
+    privacy_accepted_at DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_customer_profiles_customer (customer_id),
+
+    CONSTRAINT fk_customer_profiles_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES customers(customer_id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+
+-- ============================================================
+-- TABLE 12: ACCOUNT APPLICATIONS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS account_applications (
+    application_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_id BIGINT UNSIGNED NOT NULL,
+    applicant_user_id BIGINT UNSIGNED NOT NULL,
+    account_type_id SMALLINT UNSIGNED NOT NULL,
+
+    initial_deposit DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+    account_label VARCHAR(40) NULL,
+    make_primary BOOLEAN NOT NULL DEFAULT FALSE,
+    status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+    rejection_reason VARCHAR(500) NULL,
+    created_account_id BIGINT UNSIGNED NULL,
+    reviewed_by_user_id BIGINT UNSIGNED NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP NULL,
+
+    KEY idx_applications_status_created (status, created_at),
+    KEY idx_applications_customer (customer_id),
+
+    CONSTRAINT fk_applications_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES customers(customer_id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_applications_applicant
+        FOREIGN KEY (applicant_user_id)
+        REFERENCES app_users(user_id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_applications_account_type
+        FOREIGN KEY (account_type_id)
+        REFERENCES account_types(account_type_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_applications_created_account
+        FOREIGN KEY (created_account_id)
+        REFERENCES bank_accounts(account_id)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_applications_reviewer
+        FOREIGN KEY (reviewed_by_user_id)
+        REFERENCES app_users(user_id)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+
+-- ============================================================
 -- VIEW 1: ACCOUNT SUMMARY
 -- ============================================================
 

@@ -1,4 +1,7 @@
+import { DemoApiError, demoRequest } from '@/api/demo';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 const AUTH_TOKEN_KEY = 'gellybank.token';
 
@@ -36,8 +39,21 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+function runDemo<T>(path: string, method: HttpMethod, body?: unknown): T {
+  try {
+    return demoRequest<T>(path, method, body);
+  } catch (error) {
+    if (error instanceof DemoApiError) {
+      throw new ApiError(error.message, error.status, error.code);
+    }
+    throw error;
+  }
+}
+
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, signal } = options;
+
+  if (DEMO_MODE) return runDemo<T>(path, method, body);
 
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -45,12 +61,20 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const token = getAuthToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    // Dev-only fallback: review the UI even when the Flask API is not running.
+    if (import.meta.env.DEV) return runDemo<T>(path, method, body);
+    throw error;
+  }
 
   if (!response.ok) {
     let message = `Request failed (status ${response.status}).`;

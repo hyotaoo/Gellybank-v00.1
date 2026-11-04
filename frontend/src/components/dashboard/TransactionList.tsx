@@ -81,13 +81,13 @@ const TransactionList = ({ accountId, currency, limit, className = '' }: Transac
   if (transactions.length === 0) {
     return (
       <div className={`flex flex-1 flex-col items-center justify-center gap-4 ${className}`}>
-        <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-white text-primary">
-          <HistoryIcon className="h-8 w-8" />
+        <span className="flex h-[99px] w-[99px] items-center justify-center rounded-full border border-ink bg-white text-primary">
+          <HistoryIcon className="h-11 w-11" />
         </span>
         <div className="flex flex-col items-center gap-2 text-center">
-          <p className="text-[22px] font-semibold leading-[1.21] text-ink">No transactions yet</p>
-          <p className="max-w-[425px] text-[13px] leading-[1.21] text-muted">
-            Your recent deposits, withdrawals, and transfers will appear here.
+          <p className="text-[20px] font-semibold leading-[24px] text-ink">No transactions yet</p>
+          <p className="max-w-[433px] text-[14px] font-normal leading-[17px] text-muted">
+            Recent deposits, withdrawals, and transfers will appear here.
           </p>
         </div>
       </div>
@@ -101,7 +101,7 @@ const TransactionList = ({ accountId, currency, limit, className = '' }: Transac
   return (
     <ul className={`flex flex-col gap-3 overflow-y-auto pr-1 ${className}`}>
       {transactions.map((transaction) => (
-        <li key={transaction.id} className="flex items-center gap-4 rounded-[20px] bg-white p-4">
+        <li key={transaction.id} className="flex items-center gap-4 rounded-[20px] border border-surface-line bg-white p-4">
           <span className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-surface-card text-primary">
             {typeIcon[transaction.type]}
           </span>

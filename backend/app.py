@@ -2,7 +2,7 @@
 
 import os
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from uuid import uuid4
 
@@ -146,6 +146,34 @@ class Customer(db.Model):
         return " ".join(part for part in parts if part)
 
 
+class CustomerProfile(db.Model):
+    __tablename__ = "customer_profiles"
+
+    profile_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    customer_id = db.Column(
+        db.BigInteger, db.ForeignKey("customers.customer_id"), nullable=False, unique=True
+    )
+    suffix = db.Column(db.String(10))
+    city = db.Column(db.String(80))
+    state_region = db.Column(db.String(80))
+    postal_code = db.Column(db.String(20))
+    mailing_same = db.Column(db.String(5))
+    citizenship = db.Column(db.String(50))
+    employment_status = db.Column(db.String(50))
+    occupation = db.Column(db.String(100))
+    employer = db.Column(db.String(120))
+    annual_income = db.Column(db.String(50))
+    source_of_funds = db.Column(db.String(50))
+    ownership_type = db.Column(db.String(30))
+    purpose_of_account = db.Column(db.String(60))
+    agree_insights = db.Column(db.Boolean, nullable=False, default=False)
+    email_verified_at = db.Column(db.DateTime)
+    terms_accepted_at = db.Column(db.DateTime)
+    privacy_accepted_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+
 class AppUser(db.Model):
     __tablename__ = "app_users"
 
@@ -223,6 +251,36 @@ class BankAccount(db.Model):
             "isPrimary": is_primary,
             "interestRate": as_number(self.interest_rate),
             "createdAt": self.opened_at.isoformat() + "Z" if self.opened_at else None,
+        }
+
+
+class AccountApplication(db.Model):
+    __tablename__ = "account_applications"
+
+    application_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.customer_id"), nullable=False)
+    applicant_user_id = db.Column(
+        db.BigInteger, db.ForeignKey("app_users.user_id"), nullable=False
+    )
+    account_type_id = db.Column(
+        db.SmallInteger, db.ForeignKey("account_types.account_type_id"), nullable=False
+    )
+    initial_deposit = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    account_label = db.Column(db.String(40))
+    make_primary = db.Column(db.Boolean, nullable=False, default=False)
+    status = db.Column(db.String(20), nullable=False, default="PENDING")
+    rejection_reason = db.Column(db.String(500))
+    created_account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"))
+    reviewed_by_user_id = db.Column(db.BigInteger, db.ForeignKey("app_users.user_id"))
+    created_at = db.Column(db.DateTime, default=utcnow)
+    reviewed_at = db.Column(db.DateTime)
+
+    def to_dict(self):
+        return {
+            "id": str(self.application_id),
+            "status": (self.status or "PENDING").lower(),
+            "accountType": self.account_label,
+            "createdAt": self.created_at.isoformat() + "Z" if self.created_at else None,
         }
 
 
@@ -338,6 +396,46 @@ class Beneficiary(db.Model):
         }
 
 
+class Notification(db.Model):
+    __tablename__ = "notifications"
+
+    notification_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.BigInteger, db.ForeignKey("app_users.user_id"), nullable=False)
+    title = db.Column(db.String(120), nullable=False)
+    message = db.Column(db.String(500), nullable=False)
+    kind = db.Column(db.String(20), nullable=False, default="system")
+    href = db.Column(db.String(255))
+    is_read = db.Column(db.Boolean, nullable=False, default=False)
+    read_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    def to_dict(self):
+        return {
+            "id": str(self.notification_id),
+            "title": self.title,
+            "message": self.message,
+            "kind": (self.kind or "system").lower(),
+            "href": self.href,
+            "read": bool(self.is_read),
+            "readAt": self.read_at.isoformat() + "Z" if self.read_at else None,
+            "createdAt": self.created_at.isoformat() + "Z" if self.created_at else None,
+        }
+
+
+def add_notification(user, title, message, kind="system", href=None, created_at=None):
+    if not user:
+        return None
+    notification = Notification(
+        user_id=user.user_id,
+        title=title,
+        message=message,
+        kind=kind,
+        href=href,
+        created_at=created_at or utcnow(),
+    )
+    db.session.add(notification)
+    return notification
+
 
 def primary_account_id(customer_id):
     first = (
@@ -401,6 +499,13 @@ def create_account():
         interest_rate=account_type.default_interest_rate,
     )
     db.session.add(account)
+    add_notification(
+        user,
+        "New account opened",
+        f"Your {type_name.title()} account ending in {account.account_number[-4:]} is ready to use.",
+        "account",
+        "/dashboard/accounts",
+    )
     db.session.commit()
 
     primary = primary_account_id(user.customer_id)
@@ -522,6 +627,19 @@ def create_transaction():
         performed_by_user_id=user.user_id,
     )
     db.session.add(tx)
+    add_notification(
+        user,
+        "Deposit received" if tx_type == "DEPOSIT" else "Withdrawal completed",
+        (
+            f"PHP {amount:,.2f} was credited to your {account.type_name} account "
+            f"ending in {account.account_number[-4:]}."
+            if tx_type == "DEPOSIT"
+            else f"PHP {amount:,.2f} was debited from your {account.type_name} account "
+            f"ending in {account.account_number[-4:]}."
+        ),
+        "transaction",
+        "/dashboard/history",
+    )
     db.session.commit()
     return jsonify(tx.to_dict()), 201
 
@@ -605,6 +723,21 @@ def create_transfer():
             performed_by_user_id=user.user_id,
         )
         db.session.add(tx)
+        recipient = (
+            beneficiary.name
+            if beneficiary
+            else f"your {destination.type_name} account ending in {destination.account_number[-4:]}"
+        )
+        add_notification(
+            user,
+            "Transfer sent",
+            (
+                f"PHP {amount:,.2f} was sent from your {source.type_name} account "
+                f"ending in {source.account_number[-4:]} to {recipient}."
+            ),
+            "transaction",
+            "/dashboard/history",
+        )
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -750,6 +883,13 @@ def request_card():
         card_type="DEBIT",
     )
     db.session.add(card)
+    add_notification(
+        user,
+        "Card request received",
+        f"Your new debit card ending in {last4} is being prepared for delivery.",
+        "account",
+        "/dashboard/accounts",
+    )
     db.session.commit()
     return jsonify(card.to_dict()), 201
 
@@ -802,6 +942,63 @@ def spending():
 
 
 
+def my_notification(notification_id, user):
+    if not user:
+        return None
+    return Notification.query.filter_by(
+        notification_id=as_int(notification_id), user_id=user.user_id
+    ).first()
+
+
+@app.get("/api/notifications")
+def list_notifications():
+    user = current_user()
+    query = Notification.query.filter_by(user_id=user.user_id)
+
+    if request.args.get("unreadOnly", "").lower() in ("1", "true", "yes"):
+        query = query.filter_by(is_read=False)
+
+    limit = request.args.get("limit", type=int)
+    query = query.order_by(Notification.created_at.desc(), Notification.notification_id.desc())
+    if limit and limit > 0:
+        query = query.limit(limit)
+
+    return jsonify([item.to_dict() for item in query.all()])
+
+
+@app.patch("/api/notifications/read-all")
+def read_all_notifications():
+    user = current_user()
+    updated = Notification.query.filter_by(user_id=user.user_id, is_read=False).update(
+        {"is_read": True, "read_at": utcnow()},
+        synchronize_session=False,
+    )
+    db.session.commit()
+    return jsonify({"updated": updated})
+
+
+@app.patch("/api/notifications/<notification_id>")
+def update_notification(notification_id):
+    notification = my_notification(notification_id, current_user())
+    if not notification:
+        return error("Notification not found.", 404, "not_found")
+
+    data = body()
+    if "read" not in data:
+        return error("Provide a read value.", 400, "invalid_input")
+
+    if data.get("read") is True:
+        if not notification.is_read:
+            notification.is_read = True
+            notification.read_at = utcnow()
+    else:
+        notification.is_read = False
+        notification.read_at = None
+
+    db.session.commit()
+    return jsonify(notification.to_dict())
+
+
 def parse_date(value):
     try:
         return datetime.strptime(str(value), "%Y-%m-%d").date()
@@ -809,35 +1006,172 @@ def parse_date(value):
         return None
 
 
+COUNTRY_DIAL_CODES = {
+    "PH": "+63", "US": "+1", "CA": "+1", "GB": "+44", "AU": "+61", "NZ": "+64",
+    "SG": "+65", "MY": "+60", "ID": "+62", "TH": "+66", "VN": "+84", "IN": "+91",
+    "JP": "+81", "KR": "+82", "CN": "+86", "HK": "+852", "AE": "+971", "SA": "+966",
+    "DE": "+49", "FR": "+33", "ES": "+34", "IT": "+39", "NL": "+31", "BR": "+55",
+    "MX": "+52",
+}
+
+EMPLOYED_STATUSES = {"Full-Time", "Part-Time", "Self-Employed"}
+
+
+def normalize_country_code(value):
+    code = str(value or "").strip()
+    if len(code) == 2 and code.isalpha():
+        return COUNTRY_DIAL_CODES.get(code.upper(), code.upper())
+    return code
+
+
 def join_phone(country_code, phone):
-    combined = f"{country_code or ''}{phone or ''}".strip()
+    combined = f"{normalize_country_code(country_code)}{phone or ''}".strip()
     return combined[:20] or None
 
 
 @app.post("/api/auth/register")
 def register():
     data = body()
-    email = (data.get("email") or "").strip().lower()
+
+    def text_field(key):
+        value = data.get(key)
+        return value.strip() if isinstance(value, str) else ""
+
+    email = text_field("email").lower()
     password = data.get("password") or ""
+    first_name = text_field("firstName")
+    middle_name = text_field("middleName")
+    last_name = text_field("lastName")
+    suffix = text_field("suffix")
+    birthdate = parse_date(data.get("birthdate"))
+    street = text_field("address")
+    city = text_field("city")
+    state_region = text_field("state")
+    postal_code = text_field("zip")
+    phone = text_field("phone")
+    mailing_same = text_field("mailingSame")
+    citizenship = text_field("citizenship")
+    employment_status = text_field("employmentStatus")
+    occupation = text_field("occupation")
+    employer = text_field("employer")
+    annual_income = text_field("annualIncome")
+    source_of_funds = text_field("sourceOfFunds")
+    ownership_type = text_field("ownershipType")
+    purpose_of_account = text_field("purposeOfAccount")
+    account_type_name = text_field("accountType").upper()
 
     if "@" not in email or "." not in email:
         return error("Enter a valid email address.", 400, "invalid_email")
     if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
         return error("Password needs 8+ characters with a letter and a number.", 400, "weak_password")
+    if not birthdate:
+        return error("Enter a valid date of birth.", 400, "invalid_birthdate")
+
+    today = datetime.now(timezone.utc).date()
+    age = today.year - birthdate.year - ((today.month, today.day) < (birthdate.month, birthdate.day))
+    if age < 18:
+        return error("You must be at least 18 years old.", 400, "underage")
+
+    required_fields = [
+        ("First name", first_name),
+        ("Last name", last_name),
+        ("Address", street),
+        ("City", city),
+        ("State / Province / Region", state_region),
+        ("ZIP / Postal code", postal_code),
+        ("Phone number", phone),
+        ("Citizenship status", citizenship),
+        ("Employment status", employment_status),
+        ("Occupation / Job title", occupation),
+        ("Annual gross income", annual_income),
+        ("Primary source of funds", source_of_funds),
+        ("Account ownership type", ownership_type),
+        ("Primary purpose of account", purpose_of_account),
+        ("Account type", account_type_name),
+    ]
+    for label, value in required_fields:
+        if not value:
+            return error(f"{label} is required.", 400, "missing_field")
+
+    length_limits = [
+        ("Email address", email, 254),
+        ("First name", first_name, 50),
+        ("Middle name", middle_name, 50),
+        ("Last name", last_name, 50),
+        ("Suffix", suffix, 10),
+        ("Address", street, 255),
+        ("City", city, 80),
+        ("State / Province / Region", state_region, 80),
+        ("ZIP / Postal code", postal_code, 20),
+        ("Phone number", phone, 20),
+        ("Citizenship status", citizenship, 50),
+        ("Employment status", employment_status, 50),
+        ("Occupation / Job title", occupation, 100),
+        ("Employer name", employer, 120),
+        ("Annual gross income", annual_income, 50),
+        ("Primary source of funds", source_of_funds, 50),
+        ("Account ownership type", ownership_type, 30),
+        ("Primary purpose of account", purpose_of_account, 60),
+    ]
+    for label, value, limit in length_limits:
+        if len(value) > limit:
+            return error(
+                f"{label} must be {limit} characters or fewer.",
+                400,
+                "field_too_long",
+            )
+    if employment_status in EMPLOYED_STATUSES and not employer:
+        return error("Employer name is required for your employment status.", 400, "missing_field")
+    if not data.get("agreeTerms") or not data.get("agreePrivacy"):
+        return error(
+            "You must accept the Terms of Agreement and Data Privacy Notice.",
+            400,
+            "consent_required",
+        )
     if AppUser.query.filter_by(username=email).first() or Customer.query.filter_by(email=email).first():
         return error("An account with that email already exists.", 409, "email_taken")
 
+    account_type = AccountType.query.filter_by(type_name=account_type_name).first()
+    if not account_type:
+        return error("That account type is not available.", 400, "invalid_account_type")
+
+    full_address = ", ".join(
+        part for part in (street, city, f"{state_region} {postal_code}".strip()) if part
+    )
+    now = utcnow()
     customer = Customer(
-        first_name=(data.get("firstName") or "").strip(),
-        middle_name=(data.get("middleName") or "").strip() or None,
-        last_name=(data.get("lastName") or "").strip(),
-        date_of_birth=parse_date(data.get("birthdate")),
+        first_name=first_name,
+        middle_name=middle_name or None,
+        last_name=last_name,
+        date_of_birth=birthdate,
         email=email,
-        phone=join_phone(data.get("countryCode"), data.get("phone")),
-        address=(data.get("address") or "").strip() or None,
+        phone=join_phone(data.get("countryCode"), phone),
+        address=full_address[:255],
     )
     db.session.add(customer)
-    db.session.flush()  
+    db.session.flush()
+
+    profile = CustomerProfile(
+        customer_id=customer.customer_id,
+        suffix=suffix or None,
+        city=city,
+        state_region=state_region,
+        postal_code=postal_code,
+        mailing_same=mailing_same or None,
+        citizenship=citizenship,
+        employment_status=employment_status,
+        occupation=occupation,
+        employer=employer or None,
+        annual_income=annual_income,
+        source_of_funds=source_of_funds,
+        ownership_type=ownership_type,
+        purpose_of_account=purpose_of_account,
+        agree_insights=bool(data.get("agreeInsights")),
+        email_verified_at=now,
+        terms_accepted_at=now,
+        privacy_accepted_at=now,
+    )
+    db.session.add(profile)
 
     user = AppUser(
         customer_id=customer.customer_id,
@@ -846,9 +1180,32 @@ def register():
         role="CUSTOMER",
     )
     db.session.add(user)
+    db.session.flush()
+
+    application = AccountApplication(
+        customer_id=customer.customer_id,
+        applicant_user_id=user.user_id,
+        account_type_id=account_type.account_type_id,
+        initial_deposit=0,
+        account_label=account_type_name.capitalize(),
+        make_primary=True,
+        status="PENDING",
+    )
+    db.session.add(application)
+    add_notification(
+        user,
+        "Application received",
+        f"Your {account_type_name.capitalize()} account application is pending review.",
+        "account",
+        "/dashboard/accounts",
+    )
     db.session.commit()
 
-    return jsonify({"user": user.to_dict(), "token": make_token(user)}), 201
+    return jsonify({
+        "user": user.to_dict(),
+        "token": make_token(user),
+        "application": application.to_dict(),
+    }), 201
 
 
 @app.post("/api/auth/login")
@@ -957,8 +1314,74 @@ def add_demo_data():
     db.session.commit()
 
 
+def ensure_demo_notifications():
+    user = AppUser.query.filter_by(username=DEMO_EMAIL).first()
+    if not user or Notification.query.filter_by(user_id=user.user_id).first():
+        return
+
+    now = utcnow()
+    db.session.add_all([
+        Notification(
+            user_id=user.user_id,
+            title="Deposit received",
+            message="PHP 10,000.00 was credited to your checking account.",
+            kind="transaction",
+            href="/dashboard/history",
+            created_at=now - timedelta(hours=2),
+        ),
+        Notification(
+            user_id=user.user_id,
+            title="Transfer sent",
+            message="PHP 1,500.00 was sent from your checking account to Maria Santos.",
+            kind="transaction",
+            href="/dashboard/history",
+            created_at=now - timedelta(hours=5),
+        ),
+        Notification(
+            user_id=user.user_id,
+            title="AI insights ready",
+            message="Your latest spending summary is ready to review.",
+            kind="insight",
+            href="/dashboard/insights",
+            created_at=now - timedelta(days=1),
+        ),
+        Notification(
+            user_id=user.user_id,
+            title="Withdrawal completed",
+            message="PHP 2,000.00 was debited from your checking account.",
+            kind="transaction",
+            href="/dashboard/history",
+            is_read=True,
+            read_at=now - timedelta(days=1, hours=12),
+            created_at=now - timedelta(days=2),
+        ),
+        Notification(
+            user_id=user.user_id,
+            title="New login detected",
+            message="A new login to your GellyBank account was detected.",
+            kind="security",
+            href="/dashboard/profile",
+            is_read=True,
+            read_at=now - timedelta(days=3, hours=12),
+            created_at=now - timedelta(days=4),
+        ),
+        Notification(
+            user_id=user.user_id,
+            title="Account statement ready",
+            message="Your monthly account statement is ready to download.",
+            kind="account",
+            href="/dashboard/accounts",
+            is_read=True,
+            read_at=now - timedelta(days=6, hours=12),
+            created_at=now - timedelta(days=7),
+        ),
+    ])
+    db.session.commit()
+
+
 with app.app_context():
     add_demo_data()  
+    ensure_demo_notifications()
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
