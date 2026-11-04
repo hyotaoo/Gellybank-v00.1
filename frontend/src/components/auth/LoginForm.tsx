@@ -36,11 +36,11 @@ const LoginForm = () => {
         try {
           const response = await login({ email, password });
           if (response.user.role !== 'customer') {
-            setAuthToken(null);
+            setAuthToken(null, 'customer');
             setError('This sign-in page is for customer accounts.');
             return;
           }
-          setAuthToken(response.token);
+          setAuthToken(response.token, 'customer');
           navigate('/dashboard');
         } catch (err) {
           if (err instanceof ApiError && err.code === 'email_not_verified') {

@@ -1,5 +1,8 @@
 import { useState } from 'react';
+import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { login } from '@/api/auth';
+import { ApiError, setAuthToken } from '@/api/client';
 import EyeIcon from '@/components/icons/EyeIcon';
 import eyeOffIcon from '@/assets/teller/eye-off.svg';
 import brandDecorationCircle from '@/assets/teller/brand-decoration-circle-large.svg';
@@ -8,6 +11,9 @@ const TellerLoginPage = () => {
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string>();
 
   return (
     <main className="h-[100dvh] w-full overflow-hidden bg-brand-gradient font-sans text-ink">
@@ -45,9 +51,24 @@ const TellerLoginPage = () => {
         {/* Form: below title on mobile, left side on desktop */}
         <form
           className="relative z-10 flex w-full max-w-[623px] flex-col justify-between gap-4 rounded-[36px] bg-surface-card px-6 py-8 sm:px-[54px] sm:py-[35px] lg:order-1 lg:flex-1 min-[1440px]:min-h-[352px]"
-          onSubmit={(event) => {
+          onSubmit={async (event: FormEvent<HTMLFormElement>) => {
             event.preventDefault();
-            navigate('/teller/dashboard');
+            setSubmitting(true);
+            setError(undefined);
+            try {
+              const response = await login({ email, password });
+              if (response.user.role !== 'teller') {
+                setAuthToken(null, 'teller');
+                setError('Teller access is restricted to teller accounts.');
+                return;
+              }
+              setAuthToken(response.token, 'teller');
+              navigate('/teller/dashboard');
+            } catch (err) {
+              setError(err instanceof ApiError ? err.message : 'Unable to sign in. Please try again.');
+            } finally {
+              setSubmitting(false);
+            }
           }}
         >
           <h1 className="text-[24px] font-bold leading-[1.21]">Login</h1>
@@ -56,6 +77,8 @@ const TellerLoginPage = () => {
             <span className="text-[16px] font-bold leading-[1.21]">Email address</span>
             <input
               required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
               type="email"
               name="email"
               autoComplete="email"
@@ -93,11 +116,18 @@ const TellerLoginPage = () => {
             </span>
           </label>
 
+          {error && (
+            <p role="alert" className="rounded-[16px] bg-red-50 px-4 py-2.5 text-[13px] leading-[1.21] text-red-700">
+              {error}
+            </p>
+          )}
+
           <button
             type="submit"
+            disabled={submitting}
             className="h-[56px] w-full rounded-[20px] bg-primary text-[18px] font-medium leading-[1.21] transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover focus-visible:ring-offset-2"
           >
-            Sign in
+            {submitting ? 'Signing in…' : 'Sign in'}
           </button>
 
           <p className="flex items-center gap-1 text-[16px] leading-[1.21]">

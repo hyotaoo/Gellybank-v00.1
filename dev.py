@@ -445,6 +445,41 @@ def npm_install() -> bool:
     return ok
 
 
+def run_role_script(script: str, verb: str, label: str) -> bool:
+    if not venv_exists() or not packages_installed():
+        log_line("Set up the virtual environment and packages first.")
+        return False
+    if not env_written() or not database_ready():
+        log_line("Set up the database first (option 4).")
+        return False
+    log_line(f"{verb.capitalize()} {label} account ...")
+    try:
+        result = subprocess.run([str(venv_python()), script], cwd=str(BACKEND))
+    except OSError as exc:
+        log_line(f"Could not start {label} {verb}: {exc}")
+        return False
+    if result.returncode != 0:
+        log_line(f"Could not {verb} the {label} account.")
+        return False
+    return True
+
+
+def create_teller_account() -> bool:
+    return run_role_script("create_teller.py", "create", "teller")
+
+
+def remove_teller_account() -> bool:
+    return run_role_script("delete_teller.py", "remove", "teller")
+
+
+def create_admin_account() -> bool:
+    return run_role_script("create_admin.py", "create", "admin")
+
+
+def remove_admin_account() -> bool:
+    return run_role_script("delete_admin.py", "remove", "admin")
+
+
 def split_sql_statements(script: str) -> list[str]:
     statements: list[str] = []
     buffer: list[str] = []
@@ -1008,8 +1043,12 @@ def menu() -> int:
         print("  5) Install frontend packages")
         print("  6) Start servers")
         print("  7) Stop servers")
-        print("  8) Refresh status")
-        print("  9) Quit")
+        print("  8) Create teller account")
+        print("  9) Remove teller account")
+        print(" 10) Create admin account")
+        print(" 11) Remove admin account")
+        print(" 12) Refresh status")
+        print(" 13) Quit")
         print("")
         try:
             choice = input("  > ").strip().lower()
@@ -1017,7 +1056,7 @@ def menu() -> int:
             print("")
             stop_all()
             return 0
-        if choice in ("q", "9", "quit", "exit"):
+        if choice in ("q", "13", "quit", "exit"):
             stop_all()
             return 0
         elif choice in ("1", "setup", "all"):
@@ -1034,7 +1073,15 @@ def menu() -> int:
             start_all()
         elif choice in ("7", "stop"):
             stop_all()
-        elif choice in ("8", "status", "refresh"):
+        elif choice in ("8", "teller"):
+            create_teller_account()
+        elif choice in ("9", "remove-teller"):
+            remove_teller_account()
+        elif choice in ("10", "admin"):
+            create_admin_account()
+        elif choice in ("11", "remove-admin"):
+            remove_admin_account()
+        elif choice in ("12", "status", "refresh"):
             pass
         else:
             print("  Unknown option.")

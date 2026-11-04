@@ -27,7 +27,7 @@ const Sidebar = () => {
   const navigate = useNavigate();
 
   const handleSignOut = () => {
-    setAuthToken(null);
+    setAuthToken(null, 'customer');
     navigate('/login');
   };
 

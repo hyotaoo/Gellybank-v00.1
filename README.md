@@ -84,6 +84,25 @@ Password reset links issued from the admin user queue are one-use, expire
 after one hour, and are shown to the admin for secure manual delivery. No
 email delivery provider is configured.
 
+## Teller portal
+
+Create a teller account the same way:
+
+```sh
+cd backend
+venv/bin/python create_teller.py
+```
+
+Or choose **8) Create teller account** from the `python dev.py` menu.
+
+Then open `/teller/login` and sign in with that account. Teller sign-in accepts
+only `TELLER` users.
+
+Remove a teller account with `venv/bin/python delete_teller.py` or menu option
+**9) Remove teller account**. The script refuses to delete accounts linked to a
+customer profile or account applications; suspend those from `/admin/users`
+instead.
+
 ## Layout
 
 ```

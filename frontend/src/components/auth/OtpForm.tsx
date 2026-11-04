@@ -80,7 +80,7 @@ const OtpForm = ({ email, onVerified, onBack }: OtpFormProps) => {
     setError(undefined);
     try {
       const response = await verifyEmail(email, entered);
-      setAuthToken(response.token);
+      setAuthToken(response.token, 'customer');
       onVerified();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to verify your email. Please try again.');

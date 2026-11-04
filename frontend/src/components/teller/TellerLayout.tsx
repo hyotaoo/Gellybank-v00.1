@@ -1,3 +1,4 @@
+import { setAuthToken } from '@/api/client';
 import PortalShell from '@/components/portal/PortalShell';
 import type { PortalNavItem } from '@/components/portal/PortalShell';
 import HomeIcon from '@/components/icons/HomeIcon';
@@ -15,6 +16,7 @@ const TellerLayout = () => (
     userName="Teller User"
     userRole="Bank Teller"
     signOutTo="/teller/login"
+    onSignOut={() => setAuthToken(null, 'teller')}
   />
 );
 

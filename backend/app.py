@@ -492,6 +492,14 @@ def push_notification(user_id, title, message, category="SYSTEM", link=None):
     ))
 
 
+def notification_user_id(customer_id):
+    """Map a customer to the app user that should receive account notifications."""
+    if customer_id is None:
+        return None
+    user = AppUser.query.filter_by(customer_id=customer_id).first()
+    return user.user_id if user else None
+
+
 class BankCard(db.Model):
     __tablename__ = "bank_cards"
 
@@ -1344,7 +1352,7 @@ def process_deposit_withdraw(user, account, kind, amount, note):
         db.session.add(tx)
         label = "Deposit" if kind == "deposit" else "Withdrawal"
         push_notification(
-            locked.customer_id,
+            notification_user_id(locked.customer_id),
             f"{label} completed",
             f"{label} of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was processed. New balance: {DEFAULT_CURRENCY} {as_number(locked.current_balance):,.2f}.",
             category="TRANSACTION",
@@ -1501,39 +1509,39 @@ def create_transfer():
             performed_by_user_id=user.user_id,
         )
         db.session.add(tx)
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-        return error("Transfer failed. Please try again.", 500, "transfer_failed")
 
-    push_notification(
-        locked_source.customer_id,
-        "Money sent",
-        f"Transfer of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was sent. Reference: {reference}.",
-        category="TRANSACTION",
-        link="/dashboard/history",
-    )
-    if locked_destination:
         push_notification(
-            locked_destination.customer_id,
-            "Money received",
-            f"Transfer of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was received. Reference: {reference}.",
+            user.user_id,
+            "Money sent",
+            f"Transfer of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was sent. Reference: {reference}.",
             category="TRANSACTION",
             link="/dashboard/history",
         )
-    else:
-        beneficiary_account = BankAccount.query.filter_by(
-            account_number=beneficiary.account_number
-        ).first()
-        if beneficiary_account:
+        if locked_destination:
             push_notification(
-                beneficiary_account.customer_id,
+                notification_user_id(locked_destination.customer_id),
                 "Money received",
                 f"Transfer of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was received. Reference: {reference}.",
                 category="TRANSACTION",
                 link="/dashboard/history",
             )
-    db.session.commit()
+        else:
+            beneficiary_account = BankAccount.query.filter_by(
+                account_number=beneficiary.account_number
+            ).first()
+            if beneficiary_account:
+                push_notification(
+                    notification_user_id(beneficiary_account.customer_id),
+                    "Money received",
+                    f"Transfer of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was received. Reference: {reference}.",
+                    category="TRANSACTION",
+                    link="/dashboard/history",
+                )
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        return error("Transfer failed. Please try again.", 500, "transfer_failed")
 
     return jsonify(tx.to_dict()), 201
 

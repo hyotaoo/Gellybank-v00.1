@@ -22,7 +22,7 @@ const AdminLayout = () => (
     userName="Admin User"
     userRole="Administrator"
     signOutTo="/admin/login"
-    onSignOut={() => setAuthToken(null)}
+    onSignOut={() => setAuthToken(null, 'admin')}
   />
 );
 

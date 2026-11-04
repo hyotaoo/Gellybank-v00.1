@@ -1,18 +1,26 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
-const AUTH_TOKEN_KEY = 'gellybank.token';
+export type TokenScope = 'customer' | 'admin' | 'teller';
 
-export const getAuthToken = (): string | null => {
-  if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem(AUTH_TOKEN_KEY);
+const authTokenKey = (scope: TokenScope): string => `gellybank.${scope}.token`;
+
+const tokenScopeForPath = (path: string): TokenScope => {
+  if (path.startsWith('/admin')) return 'admin';
+  if (path.startsWith('/teller')) return 'teller';
+  return 'customer';
 };
 
-export const setAuthToken = (token: string | null): void => {
+export const getAuthToken = (scope: TokenScope = 'customer'): string | null => {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(authTokenKey(scope));
+};
+
+export const setAuthToken = (token: string | null, scope: TokenScope = 'customer'): void => {
   if (typeof window === 'undefined') return;
   if (token) {
-    window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+    window.localStorage.setItem(authTokenKey(scope), token);
   } else {
-    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.localStorage.removeItem(authTokenKey(scope));
   }
 };
 
@@ -60,7 +68,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
-  const token = getAuthToken();
+  const token = getAuthToken(tokenScopeForPath(path));
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -79,7 +87,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
 export async function apiDownload(path: string): Promise<Blob> {
   const headers: Record<string, string> = {};
-  const token = getAuthToken();
+  const token = getAuthToken(tokenScopeForPath(path));
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch(`${API_BASE_URL}${path}`, { headers });

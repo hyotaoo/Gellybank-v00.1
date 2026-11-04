@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react';
 import type { ReactNode } from 'react';
-import { ApiError } from '@/api/client';
+import { ApiError, setAuthToken } from '@/api/client';
 import { listAccounts } from '@/api/accounts';
 import type { Account } from '@/api/accounts';
 
@@ -53,6 +53,11 @@ export const AccountProvider = ({ children }: { children: ReactNode }) => {
       });
     } catch (err) {
       if (controller.signal.aborted) return;
+      if (err instanceof ApiError && err.status === 401) {
+        setAuthToken(null, 'customer');
+        window.location.assign('/login');
+        return;
+      }
       setError(err instanceof ApiError ? err.message : 'Unable to load your accounts.');
     } finally {
       if (!controller.signal.aborted) setLoading(false);

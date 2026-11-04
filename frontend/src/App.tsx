@@ -25,12 +25,17 @@ import HistoryPage from './pages/dashboard/HistoryPage';
 import RequestsPage from './pages/dashboard/RequestsPage';
 import PlaceholderPage from './pages/dashboard/PlaceholderPage';
 import { AccountProvider } from './context/AccountContext';
+import { getAuthToken } from './api/client';
+import type { TokenScope } from './api/client';
 
 const AccountLayout = () => (
   <AccountProvider>
     <Outlet />
   </AccountProvider>
 );
+
+const RequireToken = ({ scope, redirectTo }: { scope: TokenScope; redirectTo: string }) =>
+  getAuthToken(scope) ? <Outlet /> : <Navigate to={redirectTo} replace />;
 
 function App() {
   return (
@@ -45,47 +50,53 @@ function App() {
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
 
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<Navigate to="/admin/dashboard" replace />} />
-          <Route path="dashboard" element={<AdminDashboardPage />} />
-          <Route path="users" element={<AdminUsersPage />} />
-          <Route path="applications" element={<AdminApplicationsPage />} />
-          <Route path="logs" element={<AdminLogsPage />} />
-          <Route path="backups" element={<AdminBackupsPage />} />
+        <Route element={<RequireToken scope="admin" redirectTo="/admin/login" />}>
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<Navigate to="/admin/dashboard" replace />} />
+            <Route path="dashboard" element={<AdminDashboardPage />} />
+            <Route path="users" element={<AdminUsersPage />} />
+            <Route path="applications" element={<AdminApplicationsPage />} />
+            <Route path="logs" element={<AdminLogsPage />} />
+            <Route path="backups" element={<AdminBackupsPage />} />
+          </Route>
         </Route>
 
-        <Route path="/teller" element={<TellerLayout />}>
-          <Route index element={<Navigate to="/teller/dashboard" replace />} />
-          <Route path="dashboard" element={<TellerDashboardPage />} />
-          <Route path="requests" element={<TellerRequestsPage />} />
+        <Route element={<RequireToken scope="teller" redirectTo="/teller/login" />}>
+          <Route path="/teller" element={<TellerLayout />}>
+            <Route index element={<Navigate to="/teller/dashboard" replace />} />
+            <Route path="dashboard" element={<TellerDashboardPage />} />
+            <Route path="requests" element={<TellerRequestsPage />} />
+          </Route>
         </Route>
 
-        <Route element={<AccountLayout />}>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/dashboard/accounts" element={<AccountsPage />} />
-          <Route path="/dashboard/deposit" element={<DepositPage />} />
-          <Route path="/dashboard/withdraw" element={<WithdrawPage />} />
-          <Route path="/dashboard/transfer" element={<TransferPage />} />
-          <Route path="/dashboard/history" element={<HistoryPage />} />
-          <Route path="/dashboard/requests" element={<RequestsPage />} />
-          <Route
-            path="/dashboard/insights"
-            element={
-              <PlaceholderPage
-                title="AI Insights"
-                description="Detailed spending analysis for your accounts will appear here."
-              />
-            }
-          />
-          <Route
-            path="/dashboard/profile"
-            element={
-              <PlaceholderPage
-                title="Profile"
-                description="Manage your personal details, security, and preferences here."
-              />
-            }
-          />
+        <Route element={<RequireToken scope="customer" redirectTo="/login" />}>
+          <Route element={<AccountLayout />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/dashboard/accounts" element={<AccountsPage />} />
+            <Route path="/dashboard/deposit" element={<DepositPage />} />
+            <Route path="/dashboard/withdraw" element={<WithdrawPage />} />
+            <Route path="/dashboard/transfer" element={<TransferPage />} />
+            <Route path="/dashboard/history" element={<HistoryPage />} />
+            <Route path="/dashboard/requests" element={<RequestsPage />} />
+            <Route
+              path="/dashboard/insights"
+              element={
+                <PlaceholderPage
+                  title="AI Insights"
+                  description="Detailed spending analysis for your accounts will appear here."
+                />
+              }
+            />
+            <Route
+              path="/dashboard/profile"
+              element={
+                <PlaceholderPage
+                  title="Profile"
+                  description="Manage your personal details, security, and preferences here."
+                />
+              }
+            />
+          </Route>
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />

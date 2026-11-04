@@ -58,11 +58,11 @@ const AdminLoginPage = () => {
             try {
               const response = await login({ email, password });
               if (response.user.role !== 'admin') {
-                setAuthToken(null);
+                setAuthToken(null, 'admin');
                 setError('Admin access is restricted to administrator accounts.');
                 return;
               }
-              setAuthToken(response.token);
+              setAuthToken(response.token, 'admin');
               navigate('/admin/dashboard');
             } catch (err) {
               setError(err instanceof ApiError ? err.message : 'Unable to sign in. Please try again.');

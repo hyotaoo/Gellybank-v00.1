@@ -28,8 +28,10 @@ class TransactionReceiptTests(unittest.TestCase):
                 type_name="CHECKING",
                 default_interest_rate=Decimal("0"),
             )
+            # Keep the customer id different from the app user id so notification
+            # recipients are checked against app_users.user_id, not customer_id.
             customer = backend.Customer(
-                customer_id=1,
+                customer_id=10,
                 first_name="Casey",
                 last_name="Customer",
                 email="casey@example.com",
@@ -126,6 +128,24 @@ class TransactionReceiptTests(unittest.TestCase):
             destination = backend.db.session.get(backend.BankAccount, 2)
             self.assertEqual(source.current_balance, Decimal("70.00"))
             self.assertEqual(destination.current_balance, Decimal("80.00"))
+
+    def test_transfer_notifications_target_the_app_user(self):
+        response = self.client.post(
+            "/api/transactions/transfer",
+            headers=self.headers,
+            json={
+                "sourceAccountId": "1",
+                "destinationAccountId": "2",
+                "amount": 10,
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+
+        with backend.app.app_context():
+            notifications = backend.Notification.query.all()
+            self.assertEqual(len(notifications), 2)
+            for notification in notifications:
+                self.assertEqual(notification.user_id, self.user.user_id)
 
 
 if __name__ == "__main__":
