@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError } from '@/api/client';
-import { createTransaction } from '@/api/transactions';
-import type { Transaction } from '@/api/transactions';
+import { createRequest } from '@/api/requests';
 import AccountSelect from '@/components/dashboard/AccountSelect';
 import AmountField from '@/components/dashboard/AmountField';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
-import ReceiptModal from '@/components/dashboard/ReceiptModal';
 import Input from '@/components/common/Input';
 import Button from '@/components/common/Button';
 import { useAccounts } from '@/context/AccountContext';
@@ -21,7 +19,7 @@ const WithdrawPage = () => {
   const [note, setNote] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string>();
-  const [receipt, setReceipt] = useState<Transaction | null>(null);
+  const [lastRequested, setLastRequested] = useState<number | null>(null);
 
   useEffect(() => {
     if (!accountId && selectedAccount) setAccountId(selectedAccount.id);
@@ -30,24 +28,14 @@ const WithdrawPage = () => {
   const account = accounts.find((item) => item.id === accountId);
   const parsedAmount = Number(amount);
 
-  const helper = (() => {
-    if (!account) return 'Choose the account to withdraw from.';
-    if (account.type === 'savings' && account.monthlyWithdrawalLimit) {
-      const used = account.withdrawalsThisMonth ?? 0;
-      return `Savings · withdrawals this month: ${used}/${account.monthlyWithdrawalLimit}. Overdraft is not allowed.`;
-    }
-    return 'Available for withdrawal from the selected account.';
-  })();
+  const helper = 'Withdrawals are processed at the teller. Money is held as a pending request, not deducted yet.';
 
   const amountError = (() => {
     if (!amount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
       return amount ? 'Enter an amount greater than zero.' : undefined;
     }
-    if (account && account.type === 'savings' && parsedAmount > account.balance) {
-      return 'Insufficient funds. Savings accounts cannot go below zero.';
-    }
-    if (account && parsedAmount > account.balance + (account.overdraftLimit ?? 0)) {
-      return 'Amount exceeds your available balance.';
+    if (account && parsedAmount > account.balance) {
+      return 'Insufficient funds. Pending withdrawals are held against your balance.';
     }
     return undefined;
   })();
@@ -63,21 +51,24 @@ const WithdrawPage = () => {
     setStatus('loading');
     setMessage(undefined);
     try {
-      const transaction = await createTransaction({
+      await createRequest({
         accountId,
         type: 'withdraw',
         amount: parsedAmount,
         note: note.trim() || undefined,
       });
       await refresh();
+      setLastRequested(parsedAmount);
       setStatus('success');
-      setMessage(`${formatCurrency(parsedAmount, account?.currency)} withdrawn successfully.`);
-      setReceipt(transaction);
+      setMessage(
+        `Withdrawal request for ${formatCurrency(parsedAmount, account?.currency)} submitted. A teller will process it shortly.`,
+      );
       setAmount('');
       setNote('');
     } catch (err) {
       setStatus('error');
-      setMessage(err instanceof ApiError ? err.message : 'Withdrawal failed. Please try again.');
+      setLastRequested(null);
+      setMessage(err instanceof ApiError ? err.message : 'Withdrawal request failed. Please try again.');
     }
   };
 
@@ -88,6 +79,10 @@ const WithdrawPage = () => {
           onSubmit={handleSubmit}
           className="flex flex-1 flex-col gap-5 rounded-[28px] border border-surface-line bg-surface-soft p-5 sm:p-8 lg:overflow-y-auto"
         >
+          <div className="rounded-[16px] bg-[rgba(248,231,185,0.45)] px-4 py-3 text-[13px] leading-[1.4] text-ink">
+            Withdrawals are processed at the teller. Submitting this form sends a request to the
+            teller dashboard for approval — your balance stays until the teller approves it.
+          </div>
           <AccountSelect
             label="Withdraw from"
             accounts={accounts}
@@ -108,7 +103,7 @@ const WithdrawPage = () => {
               disabled={status === 'loading'}
               className="h-[52px] px-8 text-[16px] font-semibold"
             >
-              {status === 'loading' ? 'Processing…' : 'Confirm withdrawal'}
+              {status === 'loading' ? 'Submitting…' : 'Submit withdrawal request'}
             </Button>
             {message && (
               <span
@@ -142,12 +137,14 @@ const WithdrawPage = () => {
             <p className="mt-1 text-[24px] font-bold leading-[1.21] text-ink">
               {account ? formatCurrency(account.balance, account.currency) : '—'}
             </p>
+            {lastRequested !== null && status === 'success' && (
+              <p className="mt-2 text-[12px] text-muted">
+                Pending request: {formatCurrency(lastRequested, account?.currency)}
+              </p>
+            )}
           </div>
         </aside>
       </div>
-      {receipt && (
-        <ReceiptModal transaction={receipt} account={account} onClose={() => setReceipt(null)} />
-      )}
     </DashboardLayout>
   );
 };

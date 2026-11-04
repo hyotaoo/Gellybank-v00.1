@@ -41,6 +41,7 @@ ADMIN_MIGRATION_FILE = BACKEND / "db" / "migrations" / "001_admin_operations.sql
 BENEFICIARIES_MIGRATION_FILE = BACKEND / "db" / "migrations" / "002_beneficiaries.sql"
 LEGACY_COLUMNS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "003_legacy_model_columns.sql"
 CONSENT_MIGRATION_FILE = BACKEND / "db" / "migrations" / "004_consent_columns.sql"
+TX_REQUESTS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "005_transaction_requests.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 
 DB_NAME = os.environ.get("GELLYBANK_DB_NAME", "gellybank_db")
@@ -604,6 +605,7 @@ def _run_schema_migrations(connection) -> bool:
             BENEFICIARIES_MIGRATION_FILE,
             LEGACY_COLUMNS_MIGRATION_FILE,
             CONSENT_MIGRATION_FILE,
+            TX_REQUESTS_MIGRATION_FILE,
         ):
             if not migration_file.exists():
                 log_line(f"{relative(migration_file)} is missing.")

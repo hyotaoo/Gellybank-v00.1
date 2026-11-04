@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import PortalShell from '@/components/portal/PortalShell';
+import { NavLink } from 'react-router-dom';
 import type { PortalNavItem } from '@/components/portal/PortalShell';
 import HomeIcon from '@/components/icons/HomeIcon';
 import ProfileIcon from '@/components/icons/ProfileIcon';

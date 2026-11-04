@@ -12,12 +12,14 @@ import AdminUsersPage from './pages/admin/AdminUsersPage';
 import AdminApplicationsPage from './pages/admin/AdminApplicationsPage';
 import AdminLogsPage from './pages/admin/AdminLogsPage';
 import TellerDashboardPage from './pages/teller/TellerDashboardPage';
+import TellerRequestsPage from './pages/teller/TellerRequestsPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
 import AccountsPage from './pages/dashboard/AccountsPage';
 import DepositPage from './pages/dashboard/DepositPage';
 import WithdrawPage from './pages/dashboard/WithdrawPage';
 import TransferPage from './pages/dashboard/TransferPage';
 import HistoryPage from './pages/dashboard/HistoryPage';
+import RequestsPage from './pages/dashboard/RequestsPage';
 import PlaceholderPage from './pages/dashboard/PlaceholderPage';
 import { AccountProvider } from './context/AccountContext';
 
@@ -49,6 +51,7 @@ function App() {
         <Route path="/teller" element={<TellerLayout />}>
           <Route index element={<Navigate to="/teller/dashboard" replace />} />
           <Route path="dashboard" element={<TellerDashboardPage />} />
+          <Route path="requests" element={<TellerRequestsPage />} />
         </Route>
 
         <Route element={<AccountLayout />}>
@@ -58,6 +61,7 @@ function App() {
           <Route path="/dashboard/withdraw" element={<WithdrawPage />} />
           <Route path="/dashboard/transfer" element={<TransferPage />} />
           <Route path="/dashboard/history" element={<HistoryPage />} />
+          <Route path="/dashboard/requests" element={<RequestsPage />} />
           <Route
             path="/dashboard/insights"
             element={

@@ -528,6 +528,64 @@ class AccountApplication(db.Model):
         }
 
 
+class TransactionRequest(db.Model):
+    __tablename__ = "transaction_requests"
+
+    request_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
+    customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.customer_id"), nullable=False)
+    account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"), nullable=False)
+    requested_by_user_id = db.Column(
+        db.BigInteger, db.ForeignKey("app_users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    transaction_type = db.Column(db.String(20), nullable=False)  # DEPOSIT or WITHDRAWAL
+    amount = db.Column(db.Numeric(15, 2), nullable=False)
+    note = db.Column(db.String(255))
+    status = db.Column(db.String(20), nullable=False, default="PENDING")
+    rejection_reason = db.Column(db.String(500))
+    reviewed_by_user_id = db.Column(db.BigInteger, db.ForeignKey("app_users.user_id"))
+    transaction_id = db.Column(db.BigInteger, db.ForeignKey("transactions.transaction_id"))
+    created_at = db.Column(db.DateTime, default=utcnow)
+    reviewed_at = db.Column(db.DateTime)
+
+    @property
+    def customer(self):
+        return db.session.get(Customer, self.customer_id)
+
+    @property
+    def account(self):
+        return db.session.get(BankAccount, self.account_id)
+
+    def to_dict(self, include_customer=False):
+        customer = self.customer
+        account = self.account
+        reviewer = (
+            db.session.get(AppUser, self.reviewed_by_user_id)
+            if self.reviewed_by_user_id is not None
+            else None
+        )
+        data = {
+            "id": str(self.request_id),
+            "accountId": str(self.account_id),
+            "accountNumber": account.account_number if account else None,
+            "accountLabel": account.type_name.capitalize() if account else None,
+            "type": self.transaction_type.lower(),
+            "amount": as_number(self.amount),
+            "currency": DEFAULT_CURRENCY,
+            "note": self.note,
+            "status": self.status.lower(),
+            "rejectionReason": self.rejection_reason,
+            "transactionId": str(self.transaction_id) if self.transaction_id is not None else None,
+            "reviewedByRole": reviewer.role.lower() if reviewer else None,
+            "createdAt": self.created_at.isoformat() + "Z" if self.created_at else None,
+            "reviewedAt": self.reviewed_at.isoformat() + "Z" if self.reviewed_at else None,
+        }
+        if include_customer:
+            data["customerName"] = customer.full_name if customer else ""
+            data["customerEmail"] = customer.email if customer else ""
+            data["customerId"] = str(self.customer_id)
+        return data
+
+
 class PasswordResetToken(db.Model):
     __tablename__ = "password_reset_tokens"
 
@@ -1184,14 +1242,23 @@ def process_deposit_withdraw(user, account, kind, amount, note):
 @app.post("/api/transactions")
 @authenticated_required
 def create_transaction():
-    """Customer self-service deposit/withdraw on their own account."""
+    """Customers submit requests instead; only tellers process deposits/withdrawals."""
     user = current_user()
     denied = reject_admin_transaction(user)
     if denied:
         return denied
+    if user.role == "CUSTOMER":
+        return error(
+            "Deposits and withdrawals are done by teller. Submit a request instead.",
+            403,
+            "request_required",
+        )
     data = body()
 
-    account = my_account(data.get("accountId"), user)
+    account = BankAccount.query.filter_by(
+        account_id=as_int(data.get("accountId")),
+        customer_id=user.customer_id,
+    ).first() if user.customer_id else None
     if not account:
         return error("Account not found.", 404, "not_found")
 
@@ -1356,6 +1423,114 @@ def void_transaction(tx_id):
 
 
 # ============================================================
+# CUSTOMER: deposit/withdraw requests for teller processing
+# ============================================================
+
+@app.post("/api/requests")
+@authenticated_required
+def create_request():
+    """Customer submits a deposit or withdrawal request for teller approval."""
+    user = current_user()
+    if user.role != "CUSTOMER":
+        return error("Only customer accounts can submit requests.", 403, "forbidden")
+    if not user.customer_id:
+        return error("No customer profile for this user.", 400, "no_customer")
+
+    data = body()
+    account = my_account(data.get("accountId"), user)
+    if not account:
+        return error("Account not found.", 404, "not_found")
+    if account.status != "ACTIVE":
+        return error("This account is not active.", 400, "account_inactive")
+
+    kind = str(data.get("type") or "").lower()
+    if kind not in ("deposit", "withdraw"):
+        return error("Type must be 'deposit' or 'withdraw'.", 400, "invalid_type")
+
+    try:
+        amount = check_amount(data.get("amount"))
+    except ValueError as message:
+        return error(str(message), 400, "invalid_amount")
+
+    if kind == "withdraw" and user.customer_id:
+        pending_withdraw = (
+            TransactionRequest.query
+            .filter_by(
+                customer_id=user.customer_id,
+                account_id=account.account_id,
+                transaction_type="WITHDRAWAL",
+                status="PENDING",
+            )
+            .all()
+        )
+        pending_total = sum((Decimal(str(r.amount)) for r in pending_withdraw), Decimal("0"))
+        if amount + pending_total > account.current_balance:
+            return error(
+                "Insufficient funds (pending withdrawals are held against your balance).",
+                400,
+                "insufficient_funds",
+            )
+
+    request_row = TransactionRequest(
+        customer_id=user.customer_id,
+        account_id=account.account_id,
+        requested_by_user_id=user.user_id,
+        transaction_type="WITHDRAWAL" if kind == "withdraw" else "DEPOSIT",
+        amount=amount,
+        note=(data.get("note") or "").strip() or None,
+    )
+    db.session.add(request_row)
+    db.session.commit()
+
+    result = request_row.to_dict()
+    result["label"] = result["accountLabel"]
+    return jsonify(result), 201
+
+
+@app.get("/api/requests")
+@authenticated_required
+def list_my_requests():
+    """Customer views their own requests."""
+    user = current_user()
+    if not user.customer_id:
+        return jsonify([])
+    status = request.args.get("status", "").upper()
+    query = TransactionRequest.query.filter_by(customer_id=user.customer_id)
+    if status:
+        if status not in ("PENDING", "APPROVED", "REJECTED"):
+            return error("Status must be pending, approved, or rejected.", 400, "invalid_status")
+        query = query.filter_by(status=status)
+    rows = query.order_by(TransactionRequest.created_at.desc()).limit(100).all()
+    return jsonify([r.to_dict() for r in rows])
+
+
+@app.delete("/api/requests/<request_id>")
+@authenticated_required
+def cancel_request(request_id):
+    """Customer cancels their own pending request."""
+    user = current_user()
+    row = TransactionRequest.query.filter_by(
+        request_id=as_int(request_id),
+        customer_id=user.customer_id,
+    ).first()
+    if not row:
+        return error("Request not found.", 404, "not_found")
+    if row.status != "PENDING":
+        return error("Only pending requests can be cancelled.", 409, "already_reviewed")
+
+    row.status = "CANCELLED"
+    row.reviewed_at = utcnow()
+    log_audit(
+        "REQUEST_CANCELLED",
+        "TRANSACTION_REQUEST",
+        entity_id=row.request_id,
+        actor_user_id=user.user_id,
+    )
+    db.session.commit()
+    return "", 204
+
+
+# ============================================================
 # TELLER: customer service and transaction processing
 # ============================================================
 
@@ -1470,6 +1645,99 @@ def teller_account_transactions(account_id):
         .all()
     )
     return jsonify([tx.to_dict() for tx in transactions])
+
+
+@app.get("/api/teller/requests")
+@teller_required
+def teller_list_requests():
+    """Teller dashboard: view pending (or reviewed) customer requests."""
+    status = request.args.get("status", "pending").upper()
+    if status not in ("PENDING", "APPROVED", "REJECTED", "CANCELLED", "ALL"):
+        return error("Status must be pending, approved, rejected, cancelled, or all.", 400, "invalid_status")
+    query = TransactionRequest.query
+    if status != "ALL":
+        query = query.filter_by(status=status)
+    rows = query.order_by(TransactionRequest.created_at.desc()).limit(100).all()
+    return jsonify([r.to_dict(include_customer=True) for r in rows])
+
+
+@app.post("/api/teller/requests/<request_id>/approve")
+@teller_required
+def teller_approve_request(request_id):
+    """Teller approves a pending request and completes the transaction."""
+    user = current_user()
+    row = TransactionRequest.query.filter_by(
+        request_id=as_int(request_id)
+    ).with_for_update().first()
+    if not row:
+        return error("Request not found.", 404, "not_found")
+    if row.status != "PENDING":
+        return error("This request has already been processed.", 409, "already_reviewed")
+
+    account = db.session.get(BankAccount, row.account_id)
+    if not account:
+        return error("The account for this request no longer exists.", 409, "no_account")
+
+    kind = "withdraw" if row.transaction_type == "WITHDRAWAL" else "deposit"
+    result = process_deposit_withdraw(user, account, kind, row.amount, row.note)
+    if isinstance(result, tuple):
+        # Eligibility failed at processing time (e.g. balance changed, account frozen).
+        return result
+    db.session.commit()
+
+    row.status = "APPROVED"
+    row.reviewed_by_user_id = user.user_id
+    row.reviewed_at = utcnow()
+    row.transaction_id = result.transaction_id
+    log_audit(
+        "REQUEST_APPROVED",
+        "TRANSACTION_REQUEST",
+        entity_id=row.request_id,
+        actor_user_id=user.user_id,
+        details={
+            "type": kind.upper(),
+            "amount": as_number(row.amount),
+            "accountId": str(row.account_id),
+            "transactionId": str(result.transaction_id),
+        },
+    )
+    db.session.commit()
+    return jsonify(row.to_dict(include_customer=True))
+
+
+@app.post("/api/teller/requests/<request_id>/reject")
+@teller_required
+def teller_reject_request(request_id):
+    """Teller rejects a pending request with a required reason."""
+    user = current_user()
+    row = TransactionRequest.query.filter_by(
+        request_id=as_int(request_id)
+    ).with_for_update().first()
+    if not row:
+        return error("Request not found.", 404, "not_found")
+    if row.status != "PENDING":
+        return error("This request has already been processed.", 409, "already_reviewed")
+
+    reason = (body().get("reason") or "").strip()
+    if not reason:
+        return error("A rejection reason is required.", 400, "reason_required")
+    if len(reason) > 500:
+        return error("Rejection reason must be 500 characters or fewer.", 400, "reason_too_long")
+
+    row.status = "REJECTED"
+    row.rejection_reason = reason
+    row.reviewed_by_user_id = user.user_id
+    row.reviewed_at = utcnow()
+    log_audit(
+        "REQUEST_REJECTED",
+        "TRANSACTION_REQUEST",
+        entity_id=row.request_id,
+        actor_user_id=user.user_id,
+        severity="WARN",
+        details={"type": row.transaction_type, "reason": reason},
+    )
+    db.session.commit()
+    return jsonify(row.to_dict(include_customer=True))
 
 
 
