@@ -1,8 +1,8 @@
 import AccountSwitcher from '@/components/dashboard/AccountSwitcher';
-import AiInsightsCard from '@/components/dashboard/AiInsightsCard';
 import BalanceCard from '@/components/dashboard/BalanceCard';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import DashboardSkeleton from '@/components/dashboard/DashboardSkeleton';
+import RequestsSummaryCard from '@/components/dashboard/RequestsSummaryCard';
 import TransactionHistoryCard from '@/components/dashboard/TransactionHistoryCard';
 import { useAccounts } from '@/context/AccountContext';
 
@@ -26,7 +26,7 @@ const DashboardPage = () => {
           <BalanceCard />
           <div className="flex flex-col gap-6 lg:h-[500px] lg:flex-row">
             <TransactionHistoryCard />
-            <AiInsightsCard />
+            <RequestsSummaryCard />
           </div>
         </>
       )}

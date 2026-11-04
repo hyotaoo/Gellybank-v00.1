@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import avatar from '@/assets/avatar.png';
 import { ApiError } from '@/api/client';
 import { getProfile } from '@/api/profile';
 import type { Profile } from '@/api/profile';
+import CustomerAvatar from '@/components/common/CustomerAvatar';
 import CopyButton from '@/components/common/CopyButton';
 import NotificationsDropdown from '@/components/dashboard/NotificationsDropdown';
-import RequestCardButton from '@/components/dashboard/RequestCardButton';
 import { useAccounts } from '@/context/AccountContext';
 import { formatAccountNumber } from '@/utils/format';
 
@@ -45,6 +44,14 @@ const DashboardHeader = ({ title = 'Dashboard' }: DashboardHeaderProps) => {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    const handleProfileUpdate = (event: Event) => {
+      setProfile((event as CustomEvent<Profile>).detail);
+    };
+    window.addEventListener('gellybank:profile-updated', handleProfileUpdate);
+    return () => window.removeEventListener('gellybank:profile-updated', handleProfileUpdate);
+  }, []);
+
   const accountNumber = selectedAccount
     ? formatAccountNumber(selectedAccount.accountNumber)
     : '—';
@@ -54,15 +61,15 @@ const DashboardHeader = ({ title = 'Dashboard' }: DashboardHeaderProps) => {
       <h1 className="text-[30px] font-semibold leading-none text-primary sm:text-[36px]">{title}</h1>
 
       <div className="flex items-center gap-3 sm:gap-6">
-        <RequestCardButton />
-
         <NotificationsDropdown />
 
         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-          <img
-            src={avatar}
-            alt={displayName ?? 'Account holder avatar'}
-            className="h-[61px] w-[61px] flex-none rounded-full border border-surface-input object-cover"
+          <CustomerAvatar
+            firstName={firstName}
+            middleName={middleName}
+            lastName={lastName}
+            avatar={profile?.avatar}
+            className="h-[61px] w-[61px] text-[20px]"
           />
           <div className="hidden min-w-0 flex-col sm:flex">
             <span className="truncate text-[20px] font-semibold leading-[1.21] text-ink">

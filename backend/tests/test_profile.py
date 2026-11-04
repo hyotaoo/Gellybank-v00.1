@@ -81,10 +81,44 @@ class ProfileUpdateTests(unittest.TestCase):
         self.assertEqual(response.json["middleName"], "D.")
         self.assertEqual(response.json["lastName"], "O'Brien")
 
+    def test_profile_reports_verification_status(self):
+        response = self.client.get("/api/profile", headers=self.auth_headers())
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["emailVerified"])
+        self.assertEqual(response.json["customerStatus"], "ACTIVE")
+
     def test_update_profile_allows_clearing_middle_name(self):
         response = self.patch_profile({"middleName": ""})
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json["middleName"])
+
+    def test_update_profile_stores_and_removes_avatar(self):
+        avatar = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+            "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+
+        saved = self.patch_profile({"avatar": avatar})
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json["avatar"], avatar)
+
+        profile = self.client.get("/api/profile", headers=self.auth_headers())
+        self.assertEqual(profile.json["avatar"], avatar)
+
+        removed = self.patch_profile({"avatar": None})
+        self.assertEqual(removed.status_code, 200)
+        self.assertIsNone(removed.json["avatar"])
+
+    def test_update_profile_rejects_non_image_avatar(self):
+        response = self.patch_profile({"avatar": "data:text/plain;base64,aGVsbG8="})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json["code"], "invalid_avatar")
+
+    def test_update_profile_rejects_invalid_image_data(self):
+        response = self.patch_profile({"avatar": "data:image/png;base64,not-base64"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json["code"], "invalid_avatar")
 
 
 if __name__ == "__main__":

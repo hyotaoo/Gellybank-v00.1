@@ -17,6 +17,14 @@ const typeTone: Record<string, string> = {
   deposit: 'bg-emerald-50 text-emerald-600',
   withdrawal: 'bg-amber-50 text-amber-600',
   card: 'bg-surface-card text-primary',
+  card_lost: 'bg-red-50 text-red-600',
+};
+
+const typeLabel: Record<string, string> = {
+  deposit: 'Deposit',
+  withdrawal: 'Withdrawal',
+  card: 'Card',
+  card_lost: 'Lost card',
 };
 
 const REQUEST_STATUSES: (RequestStatus | undefined)[] = [undefined, 'pending', 'approved', 'rejected', 'cancelled'];
@@ -65,8 +73,7 @@ const RequestsPage = () => {
       <section className="flex flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-[26px] font-semibold leading-none text-primary sm:text-[30px]">My Requests</h1>
-            <p className="mt-2 text-sm text-muted">
+            <p className="text-sm text-muted">
               Track your deposit and withdrawal requests sent to the teller.
             </p>
           </div>
@@ -116,11 +123,11 @@ const RequestsPage = () => {
                     </td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold capitalize ${typeTone[request.type]}`}>
-                        {request.type}
+                        {typeLabel[request.type] ?? request.type}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-right text-sm font-semibold">
-                      {request.type === 'card' ? '—' : formatCurrency(request.amount, request.currency)}
+                      {request.type === 'card' || request.type === 'card_lost' ? '—' : formatCurrency(request.amount, request.currency)}
                     </td>
                     <td className="max-w-[180px] truncate px-5 py-4 text-sm text-muted">{request.note ?? '—'}</td>
                     <td className="px-5 py-4 text-sm text-muted">

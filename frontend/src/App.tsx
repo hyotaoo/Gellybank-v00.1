@@ -12,6 +12,7 @@ import TellerLayout from './components/teller/TellerLayout';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminUsersPage from './pages/admin/AdminUsersPage';
 import AdminApplicationsPage from './pages/admin/AdminApplicationsPage';
+import AdminCardRequestsPage from './pages/admin/AdminCardRequestsPage';
 import AdminLogsPage from './pages/admin/AdminLogsPage';
 import AdminBackupsPage from './pages/admin/AdminBackupsPage';
 import TellerDashboardPage from './pages/teller/TellerDashboardPage';
@@ -23,7 +24,7 @@ import WithdrawPage from './pages/dashboard/WithdrawPage';
 import TransferPage from './pages/dashboard/TransferPage';
 import HistoryPage from './pages/dashboard/HistoryPage';
 import RequestsPage from './pages/dashboard/RequestsPage';
-import PlaceholderPage from './pages/dashboard/PlaceholderPage';
+import ProfilePage from './pages/dashboard/ProfilePage';
 import { AccountProvider } from './context/AccountContext';
 import { getAuthToken } from './api/client';
 import type { TokenScope } from './api/client';
@@ -56,6 +57,7 @@ function App() {
             <Route path="dashboard" element={<AdminDashboardPage />} />
             <Route path="users" element={<AdminUsersPage />} />
             <Route path="applications" element={<AdminApplicationsPage />} />
+            <Route path="card-requests" element={<AdminCardRequestsPage />} />
             <Route path="logs" element={<AdminLogsPage />} />
             <Route path="backups" element={<AdminBackupsPage />} />
           </Route>
@@ -78,24 +80,7 @@ function App() {
             <Route path="/dashboard/transfer" element={<TransferPage />} />
             <Route path="/dashboard/history" element={<HistoryPage />} />
             <Route path="/dashboard/requests" element={<RequestsPage />} />
-            <Route
-              path="/dashboard/insights"
-              element={
-                <PlaceholderPage
-                  title="AI Insights"
-                  description="Detailed spending analysis for your accounts will appear here."
-                />
-              }
-            />
-            <Route
-              path="/dashboard/profile"
-              element={
-                <PlaceholderPage
-                  title="Profile"
-                  description="Manage your personal details, security, and preferences here."
-                />
-              }
-            />
+            <Route path="/dashboard/profile" element={<ProfilePage />} />
           </Route>
         </Route>
 

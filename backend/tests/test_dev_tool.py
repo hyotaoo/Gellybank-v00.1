@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -102,6 +103,13 @@ class DevToolTests(unittest.TestCase):
             ("app_users", "auth_token_version"),
         )
 
+    def test_card_lost_migration_supports_card_lost_requests(self):
+        schema = dev.SCHEMA_FILE.read_text(encoding="utf-8")
+        migration = dev.CARD_LOST_MIGRATION_FILE.read_text(encoding="utf-8")
+
+        self.assertIn("'CARD_LOST'", schema)
+        self.assertIn("'CARD_LOST'", migration)
+
     def test_migration_skips_existing_foreign_key_constraints(self):
         cursor = Mock()
         cursor.fetchone.return_value = (1,)
@@ -142,6 +150,51 @@ class DevToolTests(unittest.TestCase):
             [call.args[0] for call in get.call_args_list],
             ["http://127.0.0.1:5173/", "http://localhost:5173/"],
         )
+
+    def test_backup_database_runs_backup_script(self):
+        with patch.object(dev, "run_project_script", return_value=True) as run:
+            self.assertTrue(dev.backup_database())
+
+        run.assert_called_once_with(dev.BACKUP_SCRIPT)
+
+    def test_backup_database_reports_script_failure(self):
+        with patch.object(dev, "run_project_script", return_value=False):
+            self.assertFalse(dev.backup_database())
+
+    def test_restore_database_defaults_to_latest_backup(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            backup_dir = Path(temporary_directory)
+            older = backup_dir / "gellybank_db_20260101_000000.sql"
+            newer = backup_dir / "gellybank_db_20260102_000000.sql"
+            older.write_text("SELECT 1;\n")
+            newer.write_text("SELECT 2;\n")
+            os.utime(older, (1000, 1000))
+            os.utime(newer, (2000, 2000))
+            with patch.object(dev, "BACKUP_DIR", backup_dir), patch.object(
+                dev, "run_project_script", return_value=True
+            ) as run, patch("builtins.input", return_value=""):
+                self.assertTrue(dev.restore_database())
+
+        run.assert_called_once_with(dev.RESTORE_SCRIPT, str(newer))
+
+    def test_restore_database_rejects_unknown_file(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            backup_dir = Path(temporary_directory)
+            (backup_dir / "gellybank_db_20260101_000000.sql").write_text("SELECT 1;\n")
+            with patch.object(dev, "BACKUP_DIR", backup_dir), patch.object(
+                dev, "run_project_script"
+            ) as run:
+                self.assertFalse(dev.restore_database("missing.sql"))
+
+        run.assert_not_called()
+
+    def test_run_project_script_requires_bash(self):
+        with patch.object(dev.shutil, "which", return_value=None), patch.object(
+            dev.subprocess, "run"
+        ) as run:
+            self.assertFalse(dev.run_project_script(dev.BACKUP_SCRIPT))
+
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

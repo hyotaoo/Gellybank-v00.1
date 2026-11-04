@@ -15,7 +15,6 @@ export interface RegisterInput {
   password: string;
   acceptTerms: boolean;
   acceptPrivacy: boolean;
-  acceptAiInsights: boolean;
 }
 
 export interface AuthUser {
@@ -58,3 +57,9 @@ export const resetPassword = (token: string, password: string): Promise<{ messag
     method: 'POST',
     body: { token, password },
   });
+
+export const changePassword = (input: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<{ message: string }> =>
+  apiRequest<{ message: string }>('/auth/change-password', { method: 'POST', body: input });

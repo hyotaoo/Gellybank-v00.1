@@ -40,22 +40,11 @@ const PrivacyPage = () => (
         ['Confirm who you are and prevent fraud', 'Identity, verification, security, technical', 'Legal obligation and our legitimate interest in protecting the bank and you'],
         ['Meet anti-money-laundering, tax and regulatory duties', 'Identity, account, transaction', 'Legal obligation'],
         ['Send confirmations, decisions, application updates and security alerts', 'Contact, notifications, transaction', 'Performance of our contract and our legitimate interest'],
-        ['Show spending insights and savings suggestions (AI Insights)', 'Transaction, account', 'Your consent, which you may withdraw (see Section 4)'],
         ['Staff oversight: assigning Tellers, monitoring transactions and producing summary reports', 'Transaction, account, staff activity logs', 'Our legitimate interest in sound operations and legal obligation'],
       ]}
     />
 
-    <H2>4. AI Insights and your data</H2>
-    <P>
-      AI Insights analyses your own transaction records inside Gelly Bank's systems. Your data is not sent
-      to outside AI providers, and it is not used to build insights for other customers. The analysis
-      produces spending categories, monthly summaries, trends, alerts and suggestions that appear only in
-      your dashboard. Suggestions are labelled as AI-generated and kept apart from verified balances and
-      records. It is a feature you choose: you may turn it off in your settings, and you may withdraw your
-      consent at any time. Your banking services continue to work without it.
-    </P>
-
-    <H2>5. Who we share data with</H2>
+    <H2>4. Who we share data with</H2>
     <P>
       We do not sell your personal data and we do not share it for marketing by other companies. We
       disclose it only to:
@@ -68,7 +57,7 @@ const PrivacyPage = () => (
     </List>
     <P>If we ever need to share your data in another way, we will ask for your consent first.</P>
 
-    <H2>6. How long we keep data</H2>
+    <H2>5. How long we keep data</H2>
     <LegalTable
       headers={['Data', 'Kept for']}
       rows={[
@@ -76,7 +65,6 @@ const PrivacyPage = () => (
         ['Identity and verification records', 'Same period as the account records'],
         ['Rejected or withdrawn applications', 'One year after the decision, then deleted'],
         ['Security and activity logs', 'One year'],
-        ['AI Insights results', 'Until you turn the feature off or close your account'],
       ]}
     />
     <P>
@@ -84,7 +72,7 @@ const PrivacyPage = () => (
       legal purpose.
     </P>
 
-    <H2>7. How we protect your data</H2>
+    <H2>6. How we protect your data</H2>
     <List>
       <li>Passwords and PINs are stored only in hashed form, never as readable text.</li>
       <li>Data is encrypted while travelling between your device and our servers.</li>
@@ -95,7 +83,7 @@ const PrivacyPage = () => (
       <li>No system is perfectly secure. Your own care with passwords and devices (Part A, Section 9) is part of keeping your data safe.</li>
     </List>
 
-    <H2>8. Your rights</H2>
+    <H2>7. Your rights</H2>
     <P>The Data Privacy Act gives you these rights over your personal data:</P>
     <LegalTable
       headers={['Right', 'What it means']}
@@ -103,7 +91,7 @@ const PrivacyPage = () => (
         ['Be informed', 'Know what we collect, why, and who gets it, as set out here'],
         ['Access', 'Ask for a copy of the personal data we hold about you'],
         ['Correct', 'Ask us to fix data that is wrong or out of date. Some details can be edited in your Profile'],
-        ['Object', 'Refuse processing that is based on consent, and withdraw consent, including for AI Insights'],
+        ['Object', 'Refuse processing that is based on consent, and withdraw consent'],
         ['Erase or block', 'Ask us to remove or stop using data that is unlawfully held or no longer needed, except records we must keep by law'],
         ['Data portability', 'Ask for your data in a commonly used electronic format where this applies'],
         ['Compensation', 'Claim damages if inaccurate, unlawfully obtained or unauthorised use of your data harms you'],
@@ -115,7 +103,7 @@ const PrivacyPage = () => (
       first, and we will answer within a reasonable time and explain any refusal.
     </P>
 
-    <H2>9. Contact and complaints</H2>
+    <H2>8. Contact and complaints</H2>
     <P>
       Data Protection Officer: Alyanna Faye Villanueva, Gelly Bank, 123 Sample Street, Nagcarlan, Laguna
       4002, Philippines. Email: dpo@gellybank.com. Phone: (02) 8000 0001.

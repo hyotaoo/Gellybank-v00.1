@@ -45,7 +45,13 @@ TX_REQUESTS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "005_transaction_re
 CARD_NOTIFICATIONS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "006_card_requests_and_notifications.sql"
 EMAIL_VERIFICATION_MIGRATION_FILE = BACKEND / "db" / "migrations" / "007_email_verification.sql"
 CONSENT_VERSIONS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "008_consent_versions.sql"
+DROP_AI_INSIGHTS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "009_drop_ai_insights.sql"
+CARD_LOST_MIGRATION_FILE = BACKEND / "db" / "migrations" / "010_card_lost_requests.sql"
+CUSTOMER_AVATAR_MIGRATION_FILE = BACKEND / "db" / "migrations" / "011_customer_avatar.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
+BACKUP_SCRIPT = ROOT / "scripts" / "backup_db.sh"
+RESTORE_SCRIPT = ROOT / "scripts" / "restore_db.sh"
+BACKUP_DIR = ROOT / "backups"
 
 DB_NAME = os.environ.get("GELLYBANK_DB_NAME", "gellybank_db")
 DB_USER = os.environ.get("GELLYBANK_DB_USER", "gellyca")
@@ -480,6 +486,64 @@ def remove_admin_account() -> bool:
     return run_role_script("delete_admin.py", "remove", "admin")
 
 
+def run_project_script(script: Path, *arguments: str) -> bool:
+    if not script.exists():
+        log_line(f"{relative(script)} is missing.")
+        return False
+    if not shutil.which("bash"):
+        log_line("bash not found. Database backup and restore require bash.")
+        return False
+    try:
+        result = subprocess.run(["bash", str(script), *arguments], cwd=str(ROOT))
+    except OSError as exc:
+        log_line(f"Could not run {relative(script)}: {exc}")
+        return False
+    if result.returncode != 0:
+        log_line(f"{relative(script)} exited with code {result.returncode}.")
+        return False
+    return True
+
+
+def backup_files() -> list[Path]:
+    if not BACKUP_DIR.is_dir():
+        return []
+    return sorted(
+        BACKUP_DIR.glob("*.sql"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def backup_database() -> bool:
+    log_line("Backing up the database ...")
+    return run_project_script(BACKUP_SCRIPT)
+
+
+def restore_database(filename: str | None = None) -> bool:
+    backups = backup_files()
+    if not backups:
+        log_line(f"No backups found in {relative(BACKUP_DIR)}. Run a backup first.")
+        return False
+    if filename is None:
+        print("  Available backups:")
+        for path in backups[:10]:
+            print(f"    {relative(path)}")
+        try:
+            answer = input(f"  Backup to restore [{backups[0].name}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("")
+            return False
+        filename = answer or backups[0].name
+    path = Path(filename)
+    if not path.is_absolute() and not path.exists():
+        path = BACKUP_DIR / path
+    if not path.is_file():
+        log_line(f"Backup file not found: {filename}")
+        return False
+    log_line(f"Restoring {relative(path)} ...")
+    return run_project_script(RESTORE_SCRIPT, str(path))
+
+
 def split_sql_statements(script: str) -> list[str]:
     statements: list[str] = []
     buffer: list[str] = []
@@ -596,6 +660,19 @@ def _migration_statement_exists(cursor, statement: str) -> bool:
         )
         return cursor.fetchone() is not None
 
+    drop_column = re.match(
+        r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+DROP\s+COLUMN\s+`?(\w+)`?",
+        statement,
+        re.IGNORECASE,
+    )
+    if drop_column:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            (drop_column.group(1), drop_column.group(2)),
+        )
+        return cursor.fetchone() is None
+
     constraint = re.match(
         r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+ADD\s+CONSTRAINT\s+`?(\w+)`?",
         statement,
@@ -649,6 +726,9 @@ def _run_schema_migrations(connection) -> bool:
             CARD_NOTIFICATIONS_MIGRATION_FILE,
             EMAIL_VERIFICATION_MIGRATION_FILE,
             CONSENT_VERSIONS_MIGRATION_FILE,
+            DROP_AI_INSIGHTS_MIGRATION_FILE,
+            CARD_LOST_MIGRATION_FILE,
+            CUSTOMER_AVATAR_MIGRATION_FILE,
         ):
             if not migration_file.exists():
                 log_line(f"{relative(migration_file)} is missing.")
@@ -1049,6 +1129,8 @@ def menu() -> int:
         print(" 11) Remove admin account")
         print(" 12) Refresh status")
         print(" 13) Quit")
+        print(" 14) Back up database")
+        print(" 15) Restore database")
         print("")
         try:
             choice = input("  > ").strip().lower()
@@ -1083,6 +1165,10 @@ def menu() -> int:
             remove_admin_account()
         elif choice in ("12", "status", "refresh"):
             pass
+        elif choice in ("14", "backup"):
+            backup_database()
+        elif choice in ("15", "restore"):
+            restore_database()
         else:
             print("  Unknown option.")
 

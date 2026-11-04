@@ -91,7 +91,7 @@ const TermsPage = () => (
     <P>
       A confirmed transfer is final. Gelly Bank cannot recall funds sent to an account number you entered
       correctly. If you believe a transfer was unauthorised or sent in error, report it immediately under
-      Section 12.
+      Section 11.
     </P>
 
     <H2>8. Transaction statuses and records</H2>
@@ -124,19 +124,7 @@ const TermsPage = () => (
       before it happened or we were at fault.
     </P>
 
-    <H2>10. AI Insights</H2>
-    <P>
-      AI Insights shows spending breakdowns, trends, budget suggestions, unusual-spending alerts and
-      savings tips based on your own transaction records.
-    </P>
-    <List>
-      <li>AI-generated suggestions are general information, not financial, tax or investment advice. Decide for yourself whether to act on them.</li>
-      <li>Your balances, statuses and transaction records are the verified banking information. Insights and categories may be estimated and can be wrong.</li>
-      <li>An unusual-spending alert is not proof of fraud. If you did not make a transaction, report it under Section 12.</li>
-    </List>
-    <P>How your data is used for this feature is explained in Part B.</P>
-
-    <H2>11. Prohibited use</H2>
+    <H2>10. Prohibited use</H2>
     <P>You must not:</P>
     <List>
       <li>use your account for fraud, money laundering, terrorist financing or any other unlawful purpose;</li>
@@ -147,15 +135,15 @@ const TermsPage = () => (
       <li>help anyone else do any of the above.</li>
     </List>
 
-    <H2>12. Reporting problems and disputes</H2>
+    <H2>11. Reporting problems and disputes</H2>
     <P>
       Report unauthorised or mistaken transactions, lost credentials or suspected fraud as soon as you
-      notice them, using the contact details in Section 18. Include the reference number, date and amount.
+      notice them, using the contact details in Section 17. Include the reference number, date and amount.
       We will acknowledge your report, investigate, and tell you the outcome and any correction made.
       Reports made promptly give us the best chance of limiting loss.
     </P>
 
-    <H2>13. Fees and limits</H2>
+    <H2>12. Fees and limits</H2>
     <P>
       Fees, if any, are shown before you confirm a transaction. Current fees: none for deposits,
       withdrawals, or transfers between Gelly Bank accounts.
@@ -170,42 +158,41 @@ const TermsPage = () => (
       each day on your ending balance, credited to your account once a month, and shown in your transaction
       history. Interest is reduced by taxes the law requires us to withhold (currently a 20% final
       withholding tax on peso deposit interest), so the amount credited is net of tax. Checking accounts do
-      not earn interest. We may change the rate by giving you notice under Section 17.
+      not earn interest. We may change the rate by giving you notice under Section 16.
     </P>
 
-    <H2>14. Suspension and closure</H2>
+    <H2>13. Suspension and closure</H2>
     <P>
       We may restrict, suspend or close an account, or deactivate access, if we reasonably suspect fraud or
       unlawful activity, if you break these Terms, if information you gave is false, or if the law requires
       it. Where the law allows, we will tell you why. You may ask to close your account at any time once
       your balance is withdrawn and no transaction is pending. Closing an account does not erase records we
-      must keep by law (see Part B, Section 6).
+      must keep by law (see Part B, Section 5).
     </P>
 
-    <H2>15. Our responsibility</H2>
+    <H2>14. Our responsibility</H2>
     <P>
       We will operate Gelly Bank with reasonable care and protect your account and funds as required by
       law. We are not responsible for losses caused by your sharing of credentials, by your entering a
-      wrong recipient account number, by events outside our control (such as power or network failure), or
-      by your reliance on AI Insights as financial advice. Nothing in these Terms removes rights that the
-      law gives you as a consumer of financial services.
+      wrong recipient account number, or by events outside our control (such as power or network failure).
+      Nothing in these Terms removes rights that the law gives you as a consumer of financial services.
     </P>
 
-    <H2>16. Governing law</H2>
+    <H2>15. Governing law</H2>
     <P>
       These Terms are governed by the laws of the Republic of the Philippines. Disputes are first raised
-      with us under Section 12. If unresolved, they may be brought to the appropriate regulator or the
+      with us under Section 11. If unresolved, they may be brought to the appropriate regulator or the
       proper courts of Nagcarlan, Laguna.
     </P>
 
-    <H2>17. Changes to these Terms</H2>
+    <H2>16. Changes to these Terms</H2>
     <P>
       We may update these Terms. We will notify you through the dashboard and notifications before material
       changes take effect. Continuing to use your account after the effective date means you accept the
       updated Terms. If you do not accept, you may close your account.
     </P>
 
-    <H2>18. Contact</H2>
+    <H2>17. Contact</H2>
     <P>
       Gelly Bank, 123 Sample Street, Nagcarlan, Laguna 4002, Philippines. Email: support@gellybank.com.
       Phone: (02) 8000 0000. Teller service hours: Monday to Friday, 9:00 AM to 4:00 PM. Online banking is

@@ -28,8 +28,7 @@ read your statement.
 | Portal dashboards | ⚠️ Admin and teller dashboards use local preview data so they run without the backend |
 | Admin operations | ✅ Overview, user controls, application decisions, and read-only audit logs |
 | Beneficiaries | ⚠️ Read-only in the UI — there is no screen to add, edit, or delete one |
-| Cards | ⚠️ Request only — there is no screen to list or block a card |
-| Insights | ⚠️ The backend endpoint works, but the page is a placeholder and nothing calls it |
+| Cards | ✅ Listed on Profile, with expired-replacement and lost-card requests |
 | Tests | ✅ Focused admin/auth backend tests |
 | Migrations | ⚠️ SQL remains hand-run; `db/migrations/001_admin_operations.sql` upgrades existing databases |
 
@@ -150,8 +149,7 @@ enforced by Flask decorators, not just by the frontend.
 | `POST` | `/api/beneficiaries` | Yes | ❌ unused |
 | `PATCH` | `/api/beneficiaries/<id>` | Yes | ❌ unused |
 | `DELETE` | `/api/beneficiaries/<id>` | Yes | ❌ unused |
-| `POST` | `/api/cards/request` | Yes | ✅ `RequestCardButton` |
-| `GET` | `/api/insights/spending` | Yes | ❌ unused |
+| `POST` | `/api/cards/request` | Yes | ❌ unused |
 | `GET` | `/api/admin/dashboard` | Admin | ❌ Static admin dashboard preview |
 | `GET` | `/api/admin/users` | Admin | ✅ Search system users |
 | `PATCH` | `/api/admin/users/<id>` | Admin | ✅ Change role or active status |
@@ -172,16 +170,16 @@ enforced by Flask decorators, not just by the frontend.
 | `/teller/dashboard` | `TellerDashboardPage` | Static preview; no backend required |
 | `/admin/users` | `AdminUsersPage` | Role/status management and password reset links |
 | `/admin/applications` | `AdminApplicationsPage` | Approve/reject account requests |
+| `/admin/card-requests` | `AdminCardRequestsPage` | Approve/reject lost card reports |
 | `/admin/logs` | `AdminLogsPage` | Searchable severity/actor-filtered audit events |
 | `/reset-password` | `ResetPasswordPage` | Redeem one-time password reset link |
 | `/signup` | `SignUpPage` | Steps: details → email verification → success. A 6-digit code is emailed and checked by the backend |
-| `/dashboard` | `DashboardPage` | Balance, quick actions, AI Insights card |
+| `/dashboard` | `DashboardPage` | Balance, quick actions, transaction history, requests |
 | `/dashboard/accounts` | `AccountsPage` | Open / close / set-primary |
 | `/dashboard/deposit` | `DepositPage` | |
 | `/dashboard/withdraw` | `WithdrawPage` | |
 | `/dashboard/transfer` | `TransferPage` | Internal transfer, or transfer to a saved beneficiary |
 | `/dashboard/history` | `HistoryPage` | Statement for the selected account |
-| `/dashboard/insights` | `PlaceholderPage` | Not built yet |
 | `/dashboard/profile` | `PlaceholderPage` | Not built yet |
 
 The admin and teller dashboard routes render static preview data and do not
@@ -333,9 +331,8 @@ money.
 1. `current_user()` (lines 113-124) — drop the demo-customer fallback. Return
    `None` when the `Authorization` header is missing or the token is invalid.
 2. Add a `require_user` decorator and apply it to `/api/accounts*`,
-   `/api/transactions*`, `/api/beneficiaries*`, `/api/cards/request`, and
-   `/api/insights/spending`. These stay open: `/api/auth/register`,
-   `/api/auth/login`, `/api/health`, and `/`.
+   `/api/transactions*`, `/api/beneficiaries*`, and `/api/cards/request`. These
+   stay open: `/api/auth/register`, `/api/auth/login`, `/api/health`, and `/`.
 3. The decorator returns `401` with
    `{"message": "Sign in to continue.", "code": "unauthorized"}`. Handlers then
    read the user from `g.user` and drop their current
@@ -394,9 +391,6 @@ fallback to a real lookup.
 
 - A beneficiaries screen (add, edit, delete) — the API is already there.
 - A cards screen (list, block) — only request works today.
-- A real insights page that calls `/api/insights/spending` instead of
-  `PlaceholderPage`. Note the "AI" is currently a single hardcoded tip string
-  in `backend/app.py:800`; a real breakdown is just a category summary.
 - A profile page.
 
 ### Phase 5 — Housekeeping

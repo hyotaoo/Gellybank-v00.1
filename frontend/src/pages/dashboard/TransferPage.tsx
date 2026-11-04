@@ -81,9 +81,9 @@ const TransferPage = () => {
       setMessage('Choose a different destination account.');
       return;
     }
-    if (mode === 'external' && !beneficiaryId) {
+    if (mode === 'external' && !beneficiaryId && !destinationAccountNumber) {
       setStatus('error');
-      setMessage('Choose a recipient.');
+      setMessage('Choose a recipient or enter an account number.');
       return;
     }
 
@@ -95,7 +95,10 @@ const TransferPage = () => {
         amount: parsedAmount,
         note: note.trim() || undefined,
         destinationAccountId: mode === 'internal' ? destinationId : undefined,
-        beneficiaryId: mode === 'external' ? beneficiaryId : undefined,
+        destinationAccountNumber:
+          mode === 'external' && destinationAccountNumber ? destinationAccountNumber : undefined,
+        beneficiaryId:
+          mode === 'external' && !destinationAccountNumber ? beneficiaryId : undefined,
       });
       await refresh();
       setStatus('success');
@@ -105,6 +108,7 @@ const TransferPage = () => {
       setNote('');
       setDestinationId('');
       setBeneficiaryId('');
+      setDestinationAccountNumber('');
     } catch (err) {
       setStatus('error');
       setMessage(err instanceof ApiError ? err.message : 'Transfer failed. Please try again.');
@@ -113,7 +117,8 @@ const TransferPage = () => {
 
   const destinationLabel = (() => {
     if (mode === 'internal') return destinationAccount?.label ?? '—';
-    return beneficiary?.name ?? '—';
+    if (beneficiary) return beneficiary.name;
+    return destinationAccountNumber ? maskAccountNumber(destinationAccountNumber) : '—';
   })();
 
   return (
@@ -166,22 +171,53 @@ const TransferPage = () => {
               placeholder="Choose one of your accounts"
             />
           ) : (
-            <label className="flex flex-col gap-2">
-              <span className="text-[14px] font-medium leading-[1.21] text-ink">Recipient</span>
-              <Select value={beneficiaryId} onChange={(event) => setBeneficiaryId(event.target.value)}>
-                <option value="">Select a recipient</option>
-                {beneficiaries.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} · {maskAccountNumber(item.accountNumber)}
-                  </option>
-                ))}
-              </Select>
-              {beneficiaries.length === 0 && (
+            <div className="flex flex-col gap-4 rounded-[20px] border border-surface-line bg-white p-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-[14px] font-medium leading-[1.21] text-ink">Saved recipient</span>
+                <Select
+                  value={beneficiaryId}
+                  onChange={(event) => {
+                    setBeneficiaryId(event.target.value);
+                    if (event.target.value) setDestinationAccountNumber('');
+                  }}
+                >
+                  <option value="">Select a recipient</option>
+                  {beneficiaries.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} · {maskAccountNumber(item.accountNumber)}
+                    </option>
+                  ))}
+                </Select>
+                {beneficiaries.length === 0 && (
+                  <span className="text-[12px] leading-[1.21] text-muted">
+                    No saved recipients yet.
+                  </span>
+                )}
+              </label>
+
+              <div className="flex items-center gap-3 text-[12px] leading-[1.21] text-muted">
+                <span className="h-px flex-1 bg-surface-line" />
+                or
+                <span className="h-px flex-1 bg-surface-line" />
+              </div>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-[14px] font-medium leading-[1.21] text-ink">Gellybank account number</span>
+                <Input
+                  value={destinationAccountNumber}
+                  inputMode="numeric"
+                  placeholder="e.g. 100020003099"
+                  onChange={(event) => {
+                    const value = event.target.value.replace(/\D/g, '');
+                    setDestinationAccountNumber(value);
+                    if (value) setBeneficiaryId('');
+                  }}
+                />
                 <span className="text-[12px] leading-[1.21] text-muted">
-                  No saved recipients yet.
+                  Send to another Gellybank customer by entering their account number.
                 </span>
-              )}
-            </label>
+              </label>
+            </div>
           )}
 
           <AmountField value={amount} onChange={setAmount} error={amountError} helper="Amount to send." />

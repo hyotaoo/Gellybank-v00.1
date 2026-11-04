@@ -147,6 +147,64 @@ class TransactionReceiptTests(unittest.TestCase):
             for notification in notifications:
                 self.assertEqual(notification.user_id, self.user.user_id)
 
+    def test_transfer_to_another_customer_by_account_number(self):
+        with backend.app.app_context():
+            recipient = backend.Customer(
+                customer_id=20,
+                first_name="Riley",
+                last_name="Recipient",
+                email="riley@example.com",
+            )
+            recipient_user = backend.AppUser(
+                user_id=21,
+                customer_id=recipient.customer_id,
+                username=recipient.email,
+                password_hash=backend.hash_password("recipient123"),
+                role="CUSTOMER",
+            )
+            recipient_account = backend.BankAccount(
+                account_id=3,
+                customer_id=recipient.customer_id,
+                account_type_id=1,
+                account_number="999988887777",
+                current_balance=Decimal("40.00"),
+                interest_rate=Decimal("0"),
+            )
+            backend.db.session.add_all([recipient, recipient_user, recipient_account])
+            backend.db.session.commit()
+
+        response = self.client.post(
+            "/api/transactions/transfer",
+            headers=self.headers,
+            json={
+                "sourceAccountId": "1",
+                "destinationAccountNumber": "999988887777",
+                "amount": 30,
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json["balanceAfter"], 70.0)
+        self.assertEqual(response.json["counterparty"], "Riley Recipient")
+
+        with backend.app.app_context():
+            source = backend.db.session.get(backend.BankAccount, 1)
+            destination = backend.db.session.get(backend.BankAccount, 3)
+            self.assertEqual(source.current_balance, Decimal("70.00"))
+            self.assertEqual(destination.current_balance, Decimal("70.00"))
+
+    def test_transfer_to_unknown_account_number_is_rejected(self):
+        response = self.client.post(
+            "/api/transactions/transfer",
+            headers=self.headers,
+            json={
+                "sourceAccountId": "1",
+                "destinationAccountNumber": "000000000000",
+                "amount": 10,
+            },
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json["code"], "not_found")
+
 
 if __name__ == "__main__":
     unittest.main()

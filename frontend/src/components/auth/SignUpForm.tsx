@@ -30,7 +30,6 @@ export interface SignUpDetails {
   password: string;
   acceptTerms: boolean;
   acceptPrivacy: boolean;
-  acceptAiInsights: boolean;
 }
 
 interface FormState extends SignUpDetails {
@@ -76,7 +75,6 @@ const emptyValues = (): FormState => ({
   confirmPassword: '',
   acceptTerms: false,
   acceptPrivacy: false,
-  acceptAiInsights: false,
 });
 
 const validateField = (field: FieldKey, values: FormState): string | undefined => {
@@ -113,8 +111,6 @@ const validateField = (field: FieldKey, values: FormState): string | undefined =
       return values.acceptPrivacy
         ? undefined
         : 'You must read the Data Privacy Notice and consent to the processing of your personal data.';
-    case 'acceptAiInsights':
-      return undefined;
     default:
       return undefined;
   }
@@ -133,7 +129,7 @@ const STEPS: Array<{ title: string; fields: FieldKey[] }> = [
   },
   {
     title: 'Security',
-    fields: ['password', 'confirmPassword', 'acceptTerms', 'acceptPrivacy', 'acceptAiInsights'],
+    fields: ['password', 'confirmPassword', 'acceptTerms', 'acceptPrivacy'],
   },
 ];
 
@@ -398,19 +394,6 @@ const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) =>
             </span>
           </label>
 
-          <label className="flex items-start gap-2 text-[13px] leading-[1.3] text-ink">
-            <input
-              type="checkbox"
-              checked={values.acceptAiInsights}
-              onChange={(event) => update('acceptAiInsights', event.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
-            />
-            <span>
-              <span className="font-semibold">Optional.</span> I agree to Gelly Bank analysing my
-              transaction records within its own systems to show me AI Insights. I can withdraw this at
-              any time. Declining does not affect my banking services.
-            </span>
-          </label>
           {(errors.acceptTerms || errors.acceptPrivacy) && (
             <span className="text-[12px] leading-[1.21] text-red-600">
               {errors.acceptTerms ?? errors.acceptPrivacy}

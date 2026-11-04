@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom';
-import AiInsightsIcon from '@/components/icons/AiInsightsIcon';
 import DepositIcon from '@/components/icons/DepositIcon';
 import HistoryIcon from '@/components/icons/HistoryIcon';
 import HomeIcon from '@/components/icons/HomeIcon';
@@ -19,7 +18,6 @@ const navItems = [
   { label: 'Transfer', to: '/dashboard/transfer', icon: <TransferIcon className="h-6 w-6" /> },
   { label: 'Requests', to: '/dashboard/requests', icon: <HistoryIcon className="h-6 w-6" /> },
   { label: 'History', to: '/dashboard/history', icon: <HistoryIcon className="h-6 w-6" /> },
-  { label: 'AI Insights', to: '/dashboard/insights', icon: <AiInsightsIcon className="h-6 w-6" /> },
   { label: 'Profile', to: '/dashboard/profile', icon: <ProfileIcon className="h-6 w-6" /> },
 ];
 

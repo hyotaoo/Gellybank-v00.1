@@ -2,6 +2,8 @@
 
 import os
 import random
+import base64
+import binascii
 import hashlib
 import hmac
 import secrets
@@ -19,6 +21,7 @@ from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import text
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -281,12 +284,11 @@ class Customer(db.Model):
     email = db.Column(db.String(254), nullable=False, unique=True)
     phone = db.Column(db.String(20))
     address = db.Column(db.String(255))
+    avatar = db.Column(db.Text().with_variant(MEDIUMTEXT(), "mysql"))
     status = db.Column(db.String(20), nullable=False, default="ACTIVE")
     terms_accepted_at = db.Column(db.DateTime)
     privacy_accepted_at = db.Column(db.DateTime)
     consent_version = db.Column(db.String(64))
-    ai_insights_consent = db.Column(db.Boolean, nullable=False, default=False)
-    ai_insights_consent_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=utcnow)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
@@ -505,7 +507,6 @@ class BankCard(db.Model):
 
     card_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"), nullable=False)
-    provider = db.Column(db.String(30), nullable=False, default="GellyBank")
     card_number_token_or_last4 = db.Column(db.String(100), nullable=False, unique=True)
     card_number = db.Column(db.String(19), unique=True)
     cvv = db.Column(db.String(4))
@@ -1010,6 +1011,102 @@ def admin_decide_application(application_id):
         )
     db.session.commit()
     return jsonify(application.to_dict())
+
+
+@app.get("/api/admin/card-requests")
+@admin_required
+def admin_list_card_requests():
+    status = request.args.get("status", "pending").upper()
+    if status not in ("PENDING", "APPROVED", "REJECTED", "ALL"):
+        return error("Status must be pending, approved, rejected, or all.", 400, "invalid_status")
+    query = TransactionRequest.query.filter_by(transaction_type="CARD_LOST")
+    if status != "ALL":
+        query = query.filter_by(status=status)
+    rows = query.order_by(TransactionRequest.created_at.desc()).limit(100).all()
+    return jsonify([row.to_dict(include_customer=True) for row in rows])
+
+
+@app.post("/api/admin/card-requests/<request_id>/approve")
+@admin_required
+def admin_approve_card_request(request_id):
+    user = current_user()
+    row = TransactionRequest.query.filter_by(
+        request_id=as_int(request_id),
+        transaction_type="CARD_LOST",
+    ).with_for_update().first()
+    if not row:
+        return error("Card request not found.", 404, "not_found")
+    if row.status != "PENDING":
+        return error("This request has already been processed.", 409, "already_reviewed")
+
+    account = db.session.get(BankAccount, row.account_id)
+    if not account:
+        return error("The account for this request no longer exists.", 409, "no_account")
+
+    cancel_customer_active_cards(row.customer_id)
+    card = issue_card_for_account(account)
+
+    row.status = "APPROVED"
+    row.reviewed_by_user_id = user.user_id
+    row.reviewed_at = utcnow()
+    log_audit(
+        "CARD_LOST_APPROVED",
+        "TRANSACTION_REQUEST",
+        entity_id=row.request_id,
+        actor_user_id=user.user_id,
+        details={"accountId": str(row.account_id)},
+    )
+    push_notification(
+        row.requested_by_user_id,
+        "Replacement card issued",
+        f"Your lost card report was approved. A replacement debit card ending in {card.card_number[-4:]} is ready to use.",
+        category="CARD",
+        link="/dashboard/profile",
+    )
+    db.session.commit()
+    return jsonify(row.to_dict(include_customer=True))
+
+
+@app.post("/api/admin/card-requests/<request_id>/reject")
+@admin_required
+def admin_reject_card_request(request_id):
+    user = current_user()
+    row = TransactionRequest.query.filter_by(
+        request_id=as_int(request_id),
+        transaction_type="CARD_LOST",
+    ).with_for_update().first()
+    if not row:
+        return error("Card request not found.", 404, "not_found")
+    if row.status != "PENDING":
+        return error("This request has already been processed.", 409, "already_reviewed")
+
+    reason = (body().get("reason") or "").strip()
+    if not reason:
+        return error("A rejection reason is required.", 400, "reason_required")
+    if len(reason) > 500:
+        return error("Rejection reason must be 500 characters or fewer.", 400, "reason_too_long")
+
+    row.status = "REJECTED"
+    row.rejection_reason = reason
+    row.reviewed_by_user_id = user.user_id
+    row.reviewed_at = utcnow()
+    log_audit(
+        "CARD_LOST_REJECTED",
+        "TRANSACTION_REQUEST",
+        entity_id=row.request_id,
+        actor_user_id=user.user_id,
+        severity="WARN",
+        details={"reason": reason},
+    )
+    push_notification(
+        row.requested_by_user_id,
+        "Lost card report rejected",
+        f"Your lost card report was rejected. Reason: {reason}",
+        category="CARD",
+        link="/dashboard/profile",
+    )
+    db.session.commit()
+    return jsonify(row.to_dict(include_customer=True))
 
 
 @app.get("/api/admin/logs")
@@ -1603,8 +1700,8 @@ def create_request():
         return error("This account is not active.", 400, "account_inactive")
 
     kind = str(data.get("type") or "").lower()
-    if kind not in ("deposit", "withdraw", "card"):
-        return error("Type must be 'deposit', 'withdraw', or 'card'.", 400, "invalid_type")
+    if kind not in ("deposit", "withdraw", "card", "card_lost"):
+        return error("Type must be 'deposit', 'withdraw', 'card', or 'card_lost'.", 400, "invalid_type")
 
     if kind == "card":
         request_row = TransactionRequest(
@@ -1620,6 +1717,41 @@ def create_request():
             user.user_id,
             "Card request sent",
             f"Your new card request for {account.type_name} account was sent to the teller for approval.",
+            category="CARD",
+            link="/dashboard/requests",
+        )
+        db.session.commit()
+
+        result = request_row.to_dict()
+        result["label"] = result["accountLabel"]
+        return jsonify(result), 201
+
+    if kind == "card_lost":
+        existing = TransactionRequest.query.filter_by(
+            customer_id=user.customer_id,
+            account_id=account.account_id,
+            transaction_type="CARD_LOST",
+            status="PENDING",
+        ).first()
+        if existing:
+            return error(
+                "A lost card report for this account is already pending.",
+                409,
+                "already_pending",
+            )
+        request_row = TransactionRequest(
+            customer_id=user.customer_id,
+            account_id=account.account_id,
+            requested_by_user_id=user.user_id,
+            transaction_type="CARD_LOST",
+            amount=Decimal("0.00"),
+            note=(data.get("note") or "").strip() or None,
+        )
+        db.session.add(request_row)
+        push_notification(
+            user.user_id,
+            "Lost card reported",
+            f"Your lost card report for {account.type_name} account was sent to the administrator.",
             category="CARD",
             link="/dashboard/requests",
         )
@@ -1844,7 +1976,7 @@ def teller_list_requests():
     status = request.args.get("status", "pending").upper()
     if status not in ("PENDING", "APPROVED", "REJECTED", "CANCELLED", "ALL"):
         return error("Status must be pending, approved, rejected, cancelled, or all.", 400, "invalid_status")
-    query = TransactionRequest.query
+    query = TransactionRequest.query.filter(TransactionRequest.transaction_type != "CARD_LOST")
     if status != "ALL":
         query = query.filter_by(status=status)
     rows = query.order_by(TransactionRequest.created_at.desc()).limit(100).all()
@@ -1869,15 +2001,7 @@ def teller_approve_request(request_id):
         return error("The account for this request no longer exists.", 409, "no_account")
 
     if row.transaction_type == "CARD":
-        existing = (
-            BankCard.query
-            .filter_by(account_id=account.account_id, status="ACTIVE")
-            .order_by(BankCard.card_id.desc())
-            .first()
-        )
-        if existing:
-            existing.status = "CANCELLED"
-            existing.cancelled_at = utcnow()
+        cancel_customer_active_cards(row.customer_id)
         card = issue_card_for_account(account)
         db.session.commit()
 
@@ -2096,6 +2220,24 @@ def issue_card_for_account(account):
     return card
 
 
+def cancel_customer_active_cards(customer_id):
+    """Cancel every active card held by a customer and return them."""
+    cards = (
+        BankCard.query
+        .join(BankAccount, BankCard.account_id == BankAccount.account_id)
+        .filter(
+            BankAccount.customer_id == customer_id,
+            BankCard.status == "ACTIVE",
+        )
+        .all()
+    )
+    now = utcnow()
+    for card in cards:
+        card.status = "CANCELLED"
+        card.cancelled_at = now
+    return cards
+
+
 @app.get("/api/cards")
 @authenticated_required
 def list_cards():
@@ -2103,47 +2245,63 @@ def list_cards():
     if not user.customer_id:
         return jsonify([])
 
-    accounts = BankAccount.query.filter_by(customer_id=user.customer_id).all()
-    wanted = None
+    accounts = BankAccount.query.filter_by(customer_id=user.customer_id, status="ACTIVE").all()
+    if not accounts:
+        return jsonify([])
+
+    requested = None
     if request.args.get("accountId"):
         wanted = as_int(request.args.get("accountId"))
-        accounts = [a for a in accounts if a.account_id == wanted]
+        requested = next((a for a in accounts if a.account_id == wanted), None)
+        if requested is None:
+            return jsonify([])
 
+    source = next((a for a in accounts if a.type_name == "savings"), None) or accounts[0]
     customer = user.customer
 
-    items = []
-    changed = False
-    for account in accounts:
-        if account.status != "ACTIVE":
-            continue
-        card = (
-            BankCard.query
-            .filter_by(account_id=account.account_id, status="ACTIVE")
-            .order_by(BankCard.card_id.desc())
-            .first()
+    active_cards = (
+        BankCard.query
+        .join(BankAccount, BankCard.account_id == BankAccount.account_id)
+        .filter(
+            BankAccount.customer_id == user.customer_id,
+            BankCard.status == "ACTIVE",
         )
-        if card is None or not card.card_number:
-            if card is not None:
-                card.status = "CANCELLED"
-                card.cancelled_at = utcnow()
-            card = issue_card_for_account(account)
-            changed = True
-            db.session.flush()
-            push_notification(
-                user.user_id,
-                "New card issued",
-                f"Debit card ending in {card.card_number[-4:]} was issued for your {account.type_name} account.",
-                category="CARD",
-                link="/dashboard",
-            )
-        data = card.to_dict()
-        data["holder"] = customer.full_name if customer else ""
-        data["accountNumber"] = account.account_number
-        items.append(data)
+        .order_by(BankCard.card_id.desc())
+        .all()
+    )
+    card = active_cards[0] if active_cards else None
+    changed = False
+
+    # A customer holds one card. Retire any extra active cards left by older data.
+    for extra in active_cards[1:]:
+        extra.status = "CANCELLED"
+        extra.cancelled_at = utcnow()
+        changed = True
+
+    if card is None or not card.card_number:
+        if card is not None:
+            card.status = "CANCELLED"
+            card.cancelled_at = utcnow()
+        card = issue_card_for_account(source)
+        changed = True
+        db.session.flush()
+        push_notification(
+            user.user_id,
+            "New card issued",
+            f"Debit card ending in {card.card_number[-4:]} was issued for your account.",
+            category="CARD",
+            link="/dashboard",
+        )
 
     if changed:
         db.session.commit()
-    return jsonify(items)
+
+    card_account = requested or db.session.get(BankAccount, card.account_id) or source
+    data = card.to_dict()
+    data["accountId"] = str(card_account.account_id)
+    data["holder"] = customer.full_name if customer else ""
+    data["accountNumber"] = card_account.account_number
+    return jsonify([data])
 
 
 @app.post("/api/cards/request")
@@ -2233,54 +2391,6 @@ def mark_all_notifications_read():
 
 
 
-@app.get("/api/insights/spending")
-@authenticated_required
-def spending():
-    user = current_user()
-    account_id = request.args.get("accountId")
-
-    if not user.customer_id:
-        owned_ids = []
-    else:
-        owned_ids = [a.account_id for a in BankAccount.query.filter_by(customer_id=user.customer_id).all()]
-    if account_id:
-        wanted = as_int(account_id)
-        owned_ids = [i for i in owned_ids if i == wanted]
-
-    if not owned_ids:
-        return jsonify({
-            "total": 0,
-            "currency": DEFAULT_CURRENCY,
-            "categories": [],
-            "tips": [],
-        })
-
-    outgoing = Transaction.query.filter(
-        Transaction.account_id.in_(owned_ids),
-        Transaction.transaction_type.in_(("WITHDRAWAL", "TRANSFER_OUT")),
-        Transaction.status != "VOID",
-    ).all()
-
-    totals = {}
-    for tx in outgoing:
-        label = tx.description or "Other"
-        totals[label] = totals.get(label, Decimal("0")) + tx.amount
-
-    total = sum(totals.values(), Decimal("0"))
-    categories = []
-    for label, amount in sorted(totals.items(), key=lambda item: item[1], reverse=True):
-        percent = round(float(amount / total) * 100) if total else 0
-        categories.append({"label": label, "value": percent, "amount": as_number(amount)})
-
-    return jsonify({
-        "total": as_number(total),
-        "currency": DEFAULT_CURRENCY,
-        "categories": categories,
-        "tips": ["Review your biggest spending category each week."],
-    })
-
-
-
 def validate_password(password):
     """Return (message, code) when a password is weak, or (None, None) when valid."""
     if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
@@ -2367,7 +2477,6 @@ def register():
             return error(message, 400, "invalid_name")
 
     accepted_at = utcnow()
-    ai_insights_consent = bool(data.get("acceptAiInsights"))
     customer = Customer(
         first_name=first_name,
         middle_name=middle_name or None,
@@ -2379,8 +2488,6 @@ def register():
         terms_accepted_at=accepted_at,
         privacy_accepted_at=accepted_at,
         consent_version=CONSENT_VERSION,
-        ai_insights_consent=ai_insights_consent,
-        ai_insights_consent_at=accepted_at if ai_insights_consent else None,
     )
     db.session.add(customer)
     db.session.flush()  
@@ -2577,6 +2684,9 @@ def get_profile():
         "email": customer.email,
         "phone": customer.phone,
         "address": customer.address,
+        "avatar": customer.avatar,
+        "emailVerified": user.email_verified_at is not None,
+        "customerStatus": customer.status,
     })
 
 
@@ -2607,6 +2717,24 @@ def update_profile():
     if "address" in data:
         customer.address = str(data.get("address") or "").strip()[:255] or None
         updates.append("address")
+    if "avatar" in data:
+        raw_avatar = data.get("avatar")
+        if raw_avatar in (None, ""):
+            customer.avatar = None
+        else:
+            if not isinstance(raw_avatar, str) or len(raw_avatar) > 2_000_000:
+                return error("Avatar must be an image up to 1 MB.", 400, "invalid_avatar")
+            mime, separator, payload = raw_avatar.partition(";base64,")
+            if not separator or mime not in ("data:image/png", "data:image/jpeg", "data:image/webp"):
+                return error("Avatar must be a PNG, JPG, or WebP image.", 400, "invalid_avatar")
+            try:
+                decoded = base64.b64decode(payload, validate=True)
+            except (binascii.Error, ValueError):
+                return error("Avatar image is not valid.", 400, "invalid_avatar")
+            if len(decoded) > 1_048_576:
+                return error("Avatar must be an image up to 1 MB.", 400, "invalid_avatar")
+            customer.avatar = raw_avatar
+        updates.append("avatar")
 
     if not updates:
         return error("Nothing to update.", 400, "no_changes")
@@ -2627,6 +2755,9 @@ def update_profile():
         "email": customer.email,
         "phone": customer.phone,
         "address": customer.address,
+        "avatar": customer.avatar,
+        "emailVerified": user.email_verified_at is not None,
+        "customerStatus": customer.status,
     })
 
 

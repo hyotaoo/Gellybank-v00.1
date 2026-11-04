@@ -1,6 +1,6 @@
 import { apiRequest } from '@/api/client';
 
-export type RequestType = 'deposit' | 'withdrawal' | 'card';
+export type RequestType = 'deposit' | 'withdrawal' | 'card' | 'card_lost';
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface TransactionRequest {
@@ -28,7 +28,7 @@ export interface TellerRequest extends TransactionRequest {
 
 export interface CreateRequestInput {
   accountId: string;
-  type: 'deposit' | 'withdraw' | 'card';
+  type: 'deposit' | 'withdraw' | 'card' | 'card_lost';
   amount?: number;
   note?: string;
 }

@@ -23,6 +23,7 @@ CREATE TABLE customers (
     email VARCHAR(254) NOT NULL UNIQUE,
     phone VARCHAR(20) NULL,
     address VARCHAR(255) NULL,
+    avatar MEDIUMTEXT NULL,
 
     status ENUM('ACTIVE', 'INACTIVE')
         NOT NULL DEFAULT 'ACTIVE',
@@ -30,8 +31,6 @@ CREATE TABLE customers (
     terms_accepted_at DATETIME NULL,
     privacy_accepted_at DATETIME NULL,
     consent_version VARCHAR(64) NULL,
-    ai_insights_consent BOOLEAN NOT NULL DEFAULT FALSE,
-    ai_insights_consent_at DATETIME NULL,
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -389,7 +388,7 @@ CREATE TABLE transaction_requests (
     customer_id BIGINT UNSIGNED NOT NULL,
     account_id BIGINT UNSIGNED NOT NULL,
     requested_by_user_id BIGINT UNSIGNED NOT NULL,
-    transaction_type ENUM('DEPOSIT', 'WITHDRAWAL', 'CARD') NOT NULL,
+    transaction_type ENUM('DEPOSIT', 'WITHDRAWAL', 'CARD', 'CARD_LOST') NOT NULL,
     amount DECIMAL(15,2) NOT NULL,
     note VARCHAR(255) NULL,
     status ENUM('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED')

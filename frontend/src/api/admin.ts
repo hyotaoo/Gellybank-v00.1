@@ -1,4 +1,5 @@
 import { apiDownload, apiRequest } from '@/api/client';
+import type { TellerRequest } from '@/api/requests';
 
 export type AdminRole = 'admin' | 'teller' | 'customer';
 export type AdminStatus = 'active' | 'suspended';
@@ -85,6 +86,23 @@ export const decideAccountApplication = (
     `/admin/applications/${encodeURIComponent(id)}/decision`,
     { method: 'POST', body: { decision, reason } },
   );
+
+export const listAdminCardRequests = (
+  status: 'pending' | 'approved' | 'rejected' | 'all' = 'pending',
+  signal?: AbortSignal,
+): Promise<TellerRequest[]> =>
+  apiRequest<TellerRequest[]>(`/admin/card-requests?status=${status}`, { signal });
+
+export const approveAdminCardRequest = (id: string): Promise<TellerRequest> =>
+  apiRequest<TellerRequest>(`/admin/card-requests/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+  });
+
+export const rejectAdminCardRequest = (id: string, reason: string): Promise<TellerRequest> =>
+  apiRequest<TellerRequest>(`/admin/card-requests/${encodeURIComponent(id)}/reject`, {
+    method: 'POST',
+    body: { reason },
+  });
 
 export interface BackupFile {
   name: string;

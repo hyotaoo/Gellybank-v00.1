@@ -171,7 +171,7 @@ class EmailVerificationTests(unittest.TestCase):
         self.assertEqual(verified.status_code, 200)
 
     def test_registration_records_consent_version_and_timestamps(self):
-        response = self.register(acceptAiInsights=True)
+        response = self.register()
         self.assertEqual(response.status_code, 201)
 
         with backend.app.app_context():
@@ -179,17 +179,6 @@ class EmailVerificationTests(unittest.TestCase):
             self.assertEqual(customer.consent_version, backend.CONSENT_VERSION)
             self.assertIsNotNone(customer.terms_accepted_at)
             self.assertIsNotNone(customer.privacy_accepted_at)
-            self.assertTrue(customer.ai_insights_consent)
-            self.assertIsNotNone(customer.ai_insights_consent_at)
-
-    def test_ai_insights_consent_is_optional_and_off_by_default(self):
-        response = self.register()
-        self.assertEqual(response.status_code, 201)
-
-        with backend.app.app_context():
-            customer = backend.Customer.query.filter_by(email="riley@example.com").one()
-            self.assertFalse(customer.ai_insights_consent)
-            self.assertIsNone(customer.ai_insights_consent_at)
 
     def test_registration_requires_terms_and_privacy_consent(self):
         terms = self.register(acceptTerms=False)
