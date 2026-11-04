@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import CreditCardIcon from '@/components/icons/CreditCardIcon';
-import { ApiError, requestNewCard } from '@/api/cards';
+import { ApiError } from '@/api/client';
+import { createRequest } from '@/api/requests';
+import { useAccounts } from '@/context/AccountContext';
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
@@ -8,10 +10,17 @@ const RequestCardButton = () => {
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string>();
   const controllerRef = useRef<AbortController>();
+  const { selectedAccountId } = useAccounts();
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const handleRequest = async () => {
+    if (!selectedAccountId) {
+      setStatus('error');
+      setMessage('Open an account before requesting a card.');
+      return;
+    }
+
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -20,9 +29,12 @@ const RequestCardButton = () => {
     setMessage(undefined);
 
     try {
-      const card = await requestNewCard({ cardType: 'debit' }, controller.signal);
+      await createRequest(
+        { accountId: selectedAccountId, type: 'card', amount: 0 },
+        controller.signal,
+      );
       setStatus('success');
-      setMessage(`New ${card.type} card ending in ${card.last4} requested.`);
+      setMessage('Card request sent to the teller for approval.');
     } catch (error) {
       if (controller.signal.aborted) return;
       setStatus('error');

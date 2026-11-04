@@ -5,12 +5,14 @@ import CreditCardIcon from '@/components/icons/CreditCardIcon';
 import HistoryIcon from '@/components/icons/HistoryIcon';
 import HomeIcon from '@/components/icons/HomeIcon';
 import ProfileIcon from '@/components/icons/ProfileIcon';
+import WalletIcon from '@/components/icons/WalletIcon';
 
 const navItems: PortalNavItem[] = [
   { label: 'Overview', to: '/admin/dashboard', icon: <HomeIcon className="h-5 w-5" /> },
   { label: 'Manage users', to: '/admin/users', icon: <ProfileIcon className="h-5 w-5" /> },
   { label: 'Applications', to: '/admin/applications', icon: <CreditCardIcon className="h-5 w-5" /> },
   { label: 'Audit logs', to: '/admin/logs', icon: <HistoryIcon className="h-5 w-5" /> },
+  { label: 'Backups', to: '/admin/backups', icon: <WalletIcon className="h-5 w-5" /> },
 ];
 
 const AdminLayout = () => (

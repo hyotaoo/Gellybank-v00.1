@@ -1,6 +1,8 @@
 import os
+import tempfile
 import unittest
 from decimal import Decimal
+from pathlib import Path
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["SKIP_DEMO_SEED"] = "1"
@@ -42,21 +44,28 @@ class AdminOperationsTests(unittest.TestCase):
                 username=customer.email,
                 password_hash=backend.hash_password("customer123"),
                 role="CUSTOMER",
+                email_verified_at=backend.utcnow(),
             )
             self.admin = backend.AppUser(
                 user_id=2,
                 username="admin@example.com",
                 password_hash=backend.hash_password("admin12345"),
                 role="ADMIN",
+                email_verified_at=backend.utcnow(),
             )
             self.teller = backend.AppUser(
                 user_id=3,
                 username="teller@example.com",
                 password_hash=backend.hash_password("teller123"),
                 role="TELLER",
+                email_verified_at=backend.utcnow(),
             )
             backend.db.session.add_all([self.customer, self.admin, self.teller])
             backend.db.session.commit()
+            # The lockout table lives in process memory and is shared by every
+            # test in the class; drop it so failures in one test don't lock the
+            # email used by another test.
+            backend.LOGIN_ATTEMPTS.clear()
             self.customer_token = backend.make_token(self.customer)
             self.admin_token = backend.make_token(self.admin)
             self.teller_token = backend.make_token(self.teller)
@@ -73,6 +82,8 @@ class AdminOperationsTests(unittest.TestCase):
             ("get", "/api/admin/applications"),
             ("post", "/api/admin/applications/1/decision"),
             ("get", "/api/admin/logs"),
+            ("get", "/api/admin/backups"),
+            ("get", "/api/admin/backups/sample.sql"),
         ]
         for method, path in protected_requests:
             with self.subTest(path=path, method=method):
@@ -85,6 +96,42 @@ class AdminOperationsTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.client.get("/api/accounts").status_code, 401)
+
+    def test_admin_can_list_and_download_backups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backup_dir = Path(directory)
+            (backup_dir / "gellybank_db_20260101_000000.sql").write_text("SELECT 1;\n")
+            original_dir = backend.BACKUP_DIR
+            backend.BACKUP_DIR = backup_dir
+            try:
+                listed = self.client.get(
+                    "/api/admin/backups",
+                    headers=self.auth_headers(self.admin_token),
+                )
+                self.assertEqual(listed.status_code, 200)
+                self.assertEqual(
+                    [entry["name"] for entry in listed.json],
+                    ["gellybank_db_20260101_000000.sql"],
+                )
+
+                downloaded = self.client.get(
+                    "/api/admin/backups/gellybank_db_20260101_000000.sql",
+                    headers=self.auth_headers(self.admin_token),
+                )
+                self.assertEqual(downloaded.status_code, 200)
+                self.assertEqual(downloaded.data, b"SELECT 1;\n")
+                self.assertIn(
+                    "attachment",
+                    downloaded.headers["Content-Disposition"],
+                )
+
+                missing = self.client.get(
+                    "/api/admin/backups/../app.py",
+                    headers=self.auth_headers(self.admin_token),
+                )
+                self.assertEqual(missing.status_code, 404)
+            finally:
+                backend.BACKUP_DIR = original_dir
 
     def test_admin_login_returns_distinct_role_and_failed_login_spikes_are_logged(self):
         response = self.client.post(

@@ -6,6 +6,7 @@ import { resetPassword } from '@/api/auth';
 import Button from '@/components/common/Button';
 import Input from '@/components/common/Input';
 import PasswordField from '@/components/auth/PasswordField';
+import { password as passwordValidator } from '@/utils/validation';
 
 const ResetPasswordPage = () => {
   const [searchParams] = useSearchParams();
@@ -21,6 +22,11 @@ const ResetPasswordPage = () => {
     event.preventDefault();
     if (password !== confirmation) {
       setError('Passwords do not match.');
+      return;
+    }
+    const passwordError = passwordValidator(password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
     if (!token) {

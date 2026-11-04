@@ -1,6 +1,6 @@
 from getpass import getpass
 
-from app import AppUser, app, db, hash_password
+from app import AppUser, app, db, hash_password, utcnow, validate_password
 
 
 def main():
@@ -12,9 +12,9 @@ def main():
     confirmation = getpass("Confirm admin password: ")
     if password != confirmation:
         raise SystemExit("Passwords do not match.")
-    if len(password) < 8 or not any(char.isalpha() for char in password) or not any(char.isdigit() for char in password):
-        raise SystemExit("Password needs 8+ characters with a letter and a number.")
-
+    message, code = validate_password(password)
+    if message:
+        raise SystemExit(message)
     with app.app_context():
         if AppUser.query.filter_by(username=username).first():
             raise SystemExit("An account with that email already exists.")
@@ -22,6 +22,7 @@ def main():
             username=username,
             password_hash=hash_password(password),
             role="ADMIN",
+            email_verified_at=utcnow(),
         ))
         db.session.commit()
     print("Admin account created.")

@@ -29,6 +29,9 @@ CREATE TABLE customers (
 
     terms_accepted_at DATETIME NULL,
     privacy_accepted_at DATETIME NULL,
+    consent_version VARCHAR(64) NULL,
+    ai_insights_consent BOOLEAN NOT NULL DEFAULT FALSE,
+    ai_insights_consent_at DATETIME NULL,
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -50,6 +53,7 @@ CREATE TABLE app_users (
         NOT NULL DEFAULT 'CUSTOMER',
 
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    email_verified_at DATETIME NULL,
     auth_token_version INT NOT NULL DEFAULT 0,
     last_login_at DATETIME NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -242,6 +246,8 @@ CREATE TABLE bank_cards (
     -- Never store the full card number, PIN, or CVV here.
 
     card_number_token_or_last4 VARCHAR(100) NOT NULL UNIQUE,
+    card_number VARCHAR(19) NULL UNIQUE,
+    cvv VARCHAR(4) NULL,
     card_type ENUM('DEBIT', 'ATM')
         NOT NULL DEFAULT 'DEBIT',
 
@@ -383,7 +389,7 @@ CREATE TABLE transaction_requests (
     customer_id BIGINT UNSIGNED NOT NULL,
     account_id BIGINT UNSIGNED NOT NULL,
     requested_by_user_id BIGINT UNSIGNED NOT NULL,
-    transaction_type ENUM('DEPOSIT', 'WITHDRAWAL') NOT NULL,
+    transaction_type ENUM('DEPOSIT', 'WITHDRAWAL', 'CARD') NOT NULL,
     amount DECIMAL(15,2) NOT NULL,
     note VARCHAR(255) NULL,
     status ENUM('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED')
@@ -419,6 +425,50 @@ CREATE INDEX idx_tx_requests_customer
 
 CREATE INDEX idx_tx_requests_account
     ON transaction_requests(account_id, status);
+
+
+-- ============================================================
+-- TABLE 10: NOTIFICATIONS
+-- ============================================================
+
+CREATE TABLE notifications (
+    notification_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(120) NOT NULL,
+    message VARCHAR(255) NOT NULL,
+    category VARCHAR(30) NOT NULL DEFAULT 'SYSTEM',
+    link VARCHAR(255) NULL,
+    read_at DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_notifications_user
+        FOREIGN KEY (user_id) REFERENCES app_users(user_id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_notifications_user
+    ON notifications(user_id, read_at, created_at);
+
+
+-- ============================================================
+-- TABLE 13: EMAIL VERIFICATION TOKENS
+-- ============================================================
+
+CREATE TABLE email_verification_tokens (
+    verification_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    expires_at DATETIME NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_email_verification_user
+        FOREIGN KEY (user_id) REFERENCES app_users(user_id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_email_verification_user
+    ON email_verification_tokens(user_id);
 
 
 -- ============================================================

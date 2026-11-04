@@ -49,7 +49,12 @@ Two things worth knowing before you read the code:
 Admin endpoints require an active bearer token for an `ADMIN` role. Admins
 cannot submit account applications or perform deposits, withdrawals, or
 transfers. Reset links are one-time, expire after one hour, and must be
-delivered securely by an administrator; this project has no email provider.
+delivered securely by an administrator.
+
+New customers must confirm a 6-digit code sent by email before they can sign
+in. Configure SMTP with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`,
+`SMTP_FROM` and optionally `SMTP_USE_SSL=1` in `backend/.env`. Set
+`MAIL_SUPPRESS=1` to print codes to the server log instead of sending mail.
 
 Run the focused backend tests without a MySQL server from the repository root:
 

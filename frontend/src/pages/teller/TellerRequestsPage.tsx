@@ -14,6 +14,7 @@ const statusTone: Record<string, string> = {
 const typeTone: Record<string, string> = {
   deposit: 'bg-emerald-50 text-emerald-600',
   withdrawal: 'bg-amber-50 text-amber-600',
+  card: 'bg-surface-card text-primary',
 };
 
 const STATUSES = ['pending', 'approved', 'rejected', 'cancelled'] as const;
@@ -51,9 +52,13 @@ const TellerRequestsPage = () => {
     setNotice(undefined);
     try {
       const result = await approveTellerRequest(request.id);
-      setNotice(
-        `${result.type === 'withdrawal' ? 'Withdrawal' : 'Deposit'} of ${formatCurrency(result.amount)} processed successfully.`,
-      );
+      if (result.type === 'card') {
+        setNotice('Card request approved. A new card was issued to the customer.');
+      } else {
+        setNotice(
+          `${result.type === 'withdrawal' ? 'Withdrawal' : 'Deposit'} of ${formatCurrency(result.amount)} processed successfully.`,
+        );
+      }
       setRejecting(undefined);
       setReason('');
       await refresh();
@@ -147,7 +152,7 @@ const TellerRequestsPage = () => {
                     </span>
                   </td>
                   <td className="px-5 py-4 text-right text-sm font-semibold">
-                    {formatCurrency(request.amount, request.currency)}
+                    {request.type === 'card' ? '—' : formatCurrency(request.amount, request.currency)}
                   </td>
                   <td className="max-w-[160px] truncate px-5 py-4 text-sm text-muted">{request.note ?? '—'}</td>
                   <td className="px-5 py-4 text-sm text-muted">

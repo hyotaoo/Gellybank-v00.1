@@ -18,6 +18,7 @@ const statusTone: Record<string, string> = {
 const typeTone: Record<string, string> = {
   deposit: 'bg-emerald-50 text-emerald-600',
   withdrawal: 'bg-amber-50 text-amber-600',
+  card: 'bg-surface-card text-primary',
 };
 
 const TellerDashboardPage = () => {
@@ -119,7 +120,7 @@ const TellerDashboardPage = () => {
                     </span>
                   </td>
                   <td className="px-5 py-4 text-right text-sm font-semibold sm:px-6">
-                    {formatCurrency(request.amount, request.currency)}
+                    {request.type === 'card' ? '—' : formatCurrency(request.amount, request.currency)}
                   </td>
                   <td className="px-5 py-4 text-sm text-muted sm:px-6">
                     {request.createdAt ? new Date(request.createdAt).toLocaleString() : '—'}

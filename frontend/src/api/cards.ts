@@ -2,21 +2,21 @@ import { apiRequest, ApiError } from '@/api/client';
 
 export { ApiError };
 
-export interface NewCardRequest {
-  accountId?: string;
-  cardType?: 'debit' | 'credit';
-  currency?: string;
-}
-
 export interface BankCard {
   id: string;
+  accountId: string;
   type: 'debit' | 'credit';
-  last4: string;
   status: string;
+  last4: string | null;
+  cardNumber: string | null;
+  cvv: string | null;
+  expiresOn: string | null;
+  issuedAt: string | null;
+  holder: string;
+  accountNumber: string;
 }
 
-export const requestNewCard = (
-  payload: NewCardRequest = {},
-  signal?: AbortSignal,
-): Promise<BankCard> =>
-  apiRequest<BankCard>('/cards/request', { method: 'POST', body: payload, signal });
+export const listCards = (accountId?: string, signal?: AbortSignal): Promise<BankCard[]> => {
+  const suffix = accountId ? `?accountId=${encodeURIComponent(accountId)}` : '';
+  return apiRequest<BankCard[]>(`/cards${suffix}`, { signal });
+};

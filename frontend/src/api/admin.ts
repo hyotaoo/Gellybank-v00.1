@@ -1,4 +1,4 @@
-import { apiRequest } from '@/api/client';
+import { apiDownload, apiRequest } from '@/api/client';
 
 export type AdminRole = 'admin' | 'teller' | 'customer';
 export type AdminStatus = 'active' | 'suspended';
@@ -85,6 +85,18 @@ export const decideAccountApplication = (
     `/admin/applications/${encodeURIComponent(id)}/decision`,
     { method: 'POST', body: { decision, reason } },
   );
+
+export interface BackupFile {
+  name: string;
+  size: number;
+  createdAt: string | null;
+}
+
+export const listBackups = (signal?: AbortSignal): Promise<BackupFile[]> =>
+  apiRequest<BackupFile[]>('/admin/backups', { signal });
+
+export const downloadBackup = (name: string): Promise<Blob> =>
+  apiDownload(`/admin/backups/${encodeURIComponent(name)}`);
 
 export const listAuditLogs = (
   filters: { severity?: AuditSeverity; actorId?: string },

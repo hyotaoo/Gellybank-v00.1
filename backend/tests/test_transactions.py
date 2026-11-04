@@ -61,13 +61,30 @@ class TransactionReceiptTests(unittest.TestCase):
                 interest_rate=Decimal("0"),
             )
             backend.db.session.add_all([self.user, self.source, self.destination])
+            self.teller = backend.AppUser(
+                user_id=2,
+                username="teller@example.com",
+                password_hash=backend.hash_password("teller123"),
+                role="TELLER",
+            )
+            backend.db.session.add(self.teller)
             backend.db.session.commit()
             self.headers = {"Authorization": f"Bearer {backend.make_token(self.user)}"}
+            self.teller_headers = {"Authorization": f"Bearer {backend.make_token(self.teller)}"}
+
+    def test_customer_transactions_are_routed_through_teller_requests(self):
+        denied = self.client.post(
+            "/api/transactions",
+            headers=self.headers,
+            json={"accountId": "1", "type": "deposit", "amount": 25},
+        )
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied.json["code"], "request_required")
 
     def test_deposit_and_withdrawal_return_receipt_balance(self):
         deposited = self.client.post(
-            "/api/transactions",
-            headers=self.headers,
+            "/api/teller/transactions",
+            headers=self.teller_headers,
             json={"accountId": "1", "type": "deposit", "amount": 25, "note": "Payroll"},
         )
         self.assertEqual(deposited.status_code, 201)
@@ -76,8 +93,8 @@ class TransactionReceiptTests(unittest.TestCase):
         self.assertTrue(deposited.json["reference"].startswith("TXN-"))
 
         withdrawal = self.client.post(
-            "/api/transactions",
-            headers=self.headers,
+            "/api/teller/transactions",
+            headers=self.teller_headers,
             json={"accountId": "1", "type": "withdraw", "amount": 40},
         )
         self.assertEqual(withdrawal.status_code, 201)

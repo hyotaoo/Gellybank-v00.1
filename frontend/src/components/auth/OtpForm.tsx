@@ -1,22 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, KeyboardEvent } from 'react';
+import { resendVerification, verifyEmail } from '@/api/auth';
+import { ApiError, setAuthToken } from '@/api/client';
 import Button from '@/components/common/Button';
 
 const CODE_LENGTH = 6;
 const RESEND_SECONDS = 60;
 
-const generateCode = () => String(Math.floor(100000 + Math.random() * 900000));
-
 interface OtpFormProps {
-  destination: string;
+  email: string;
   onVerified: () => void;
   onBack: () => void;
 }
 
-const OtpForm = ({ destination, onVerified, onBack }: OtpFormProps) => {
-  const [code, setCode] = useState(generateCode);
+const OtpForm = ({ email, onVerified, onBack }: OtpFormProps) => {
   const [digits, setDigits] = useState<string[]>(() => Array(CODE_LENGTH).fill(''));
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
   const inputsRef = useRef<Array<HTMLInputElement | null>>([]);
 
@@ -55,37 +56,44 @@ const OtpForm = ({ destination, onVerified, onBack }: OtpFormProps) => {
     focusInput(Math.min(pasted.length, CODE_LENGTH - 1));
   };
 
-  const resend = () => {
-    setCode(generateCode());
-    setDigits(Array(CODE_LENGTH).fill(''));
+  const resend = async () => {
     setError(undefined);
-    setSeconds(RESEND_SECONDS);
-    focusInput(0);
+    setNotice(undefined);
+    try {
+      await resendVerification(email);
+      setDigits(Array(CODE_LENGTH).fill(''));
+      setSeconds(RESEND_SECONDS);
+      setNotice('A new code is on its way.');
+      focusInput(0);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to resend the code. Please try again.');
+    }
   };
 
-  const verify = () => {
+  const verify = async () => {
     const entered = digits.join('');
     if (entered.length < CODE_LENGTH) {
       setError('Enter the 6-digit code.');
       return;
     }
-    if (entered !== code) {
-      setError('That code is incorrect. Please try again.');
-      return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      const response = await verifyEmail(email, entered);
+      setAuthToken(response.token);
+      onVerified();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to verify your email. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
-    onVerified();
   };
 
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-[28px] font-bold leading-[1.21] text-ink">Verify your account</h1>
       <p className="text-[14px] leading-[1.21] text-muted">
-        Enter the 6-digit code we sent to <span className="font-semibold text-ink">{destination}</span>.
-      </p>
-
-      <p className="rounded-[20px] bg-surface-input px-4 py-3 text-[13px] leading-[1.21] text-ink">
-        <span className="font-semibold">Demo mode</span> — no SMS is sent. Your verification code is{' '}
-        <span className="font-bold tracking-[0.14em] text-primary">{code}</span>.
+        Enter the 6-digit code we sent to <span className="font-semibold text-ink">{email}</span>.
       </p>
 
       <div className="flex justify-between gap-2" onPaste={handlePaste}>
@@ -107,15 +115,17 @@ const OtpForm = ({ destination, onVerified, onBack }: OtpFormProps) => {
         ))}
       </div>
 
+      {notice && <span className="text-[12px] leading-[1.21] text-primary">{notice}</span>}
       {error && <span className="text-[12px] leading-[1.21] text-red-600">{error}</span>}
 
       <Button
         type="button"
         variant="primary"
         onClick={verify}
+        disabled={submitting}
         className="mt-1 h-[56px] w-full justify-center text-[17px] font-semibold"
       >
-        Verify account
+        {submitting ? 'Verifying…' : 'Verify account'}
       </Button>
 
       <div className="flex items-center justify-between text-[13px] leading-[1.21]">

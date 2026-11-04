@@ -174,7 +174,7 @@ enforced by Flask decorators, not just by the frontend.
 | `/admin/applications` | `AdminApplicationsPage` | Approve/reject account requests |
 | `/admin/logs` | `AdminLogsPage` | Searchable severity/actor-filtered audit events |
 | `/reset-password` | `ResetPasswordPage` | Redeem one-time password reset link |
-| `/signup` | `SignUpPage` | Steps: details → OTP → success. The OTP screen is cosmetic; no code is sent or checked |
+| `/signup` | `SignUpPage` | Steps: details → email verification → success. A 6-digit code is emailed and checked by the backend |
 | `/dashboard` | `DashboardPage` | Balance, quick actions, AI Insights card |
 | `/dashboard/accounts` | `AccountsPage` | Open / close / set-primary |
 | `/dashboard/deposit` | `DepositPage` | |
@@ -270,8 +270,8 @@ issues are still observable in the current code.
 
 6. **The sign-up form collects fields the backend discards.**
    `sourceOfFunds` and `purposeOfAccount` are sent but never stored — there
-   are no columns for them. The OTP step in the signup flow is decorative: no
-   code is generated, sent, or checked.
+   are no columns for them. The sign-up flow now sends a 6-digit code by email
+   and the backend requires it before login.
 
 7. **`requirements.txt` does not match the installed packages.**
    `backend/requirements.txt` lists 8 packages, but the venv also has
@@ -355,8 +355,8 @@ money.
    `navigate('/dashboard')`. Show an `ApiError` message inline and disable the
    button while the request is in flight.
 8. `frontend/src/pages/auth/SignUpPage.tsx` — call `register(details)` at the
-   end of the details step. The OTP screen can stay as a cosmetic step, but
-   add a comment saying it is not actually verified.
+   end of the details step, then verify the emailed 6-digit code through
+   `/api/auth/verify-email` before showing the success screen.
 9. `frontend/src/App.tsx` — add a `RequireAuth` wrapper around the
    `AccountLayout` route, and redirect `/login` to `/dashboard` when a token
    already exists.

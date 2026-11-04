@@ -1,6 +1,6 @@
 import { apiRequest } from '@/api/client';
 
-export type RequestType = 'deposit' | 'withdrawal';
+export type RequestType = 'deposit' | 'withdrawal' | 'card';
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface TransactionRequest {
@@ -28,13 +28,13 @@ export interface TellerRequest extends TransactionRequest {
 
 export interface CreateRequestInput {
   accountId: string;
-  type: 'deposit' | 'withdraw';
-  amount: number;
+  type: 'deposit' | 'withdraw' | 'card';
+  amount?: number;
   note?: string;
 }
 
-export const createRequest = (input: CreateRequestInput): Promise<TransactionRequest> =>
-  apiRequest<TransactionRequest>('/requests', { method: 'POST', body: input });
+export const createRequest = (input: CreateRequestInput, signal?: AbortSignal): Promise<TransactionRequest> =>
+  apiRequest<TransactionRequest>('/requests', { method: 'POST', body: input, signal });
 
 export const listMyRequests = (
   status?: RequestStatus,

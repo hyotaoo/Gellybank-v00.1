@@ -19,6 +19,21 @@ export const password = (value: string): string | undefined => {
   return undefined;
 };
 
+const NAME_PATTERN = /^[\p{L} .'-]+$/u;
+
+export const name = (label = 'Name'): Validator => (value) => {
+  const trimmed = value.trim();
+  if (!trimmed) return `${label} is required.`;
+  if (trimmed.length < 2) return `${label} must be at least 2 characters.`;
+  if (trimmed.length > 50) return `${label} must be 50 characters or fewer.`;
+  return NAME_PATTERN.test(trimmed)
+    ? undefined
+    : `${label} can only contain letters, spaces, hyphens, apostrophes, and periods.`;
+};
+
+export const optionalName = (label = 'Name'): Validator => (value) =>
+  value.trim() ? name(label)(value) : undefined;
+
 export const confirmMatch =
   (original: string, label = 'Passwords'): Validator =>
   (value) => {

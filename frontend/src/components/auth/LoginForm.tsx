@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { login } from '@/api/auth';
+import { login, resendVerification } from '@/api/auth';
 import { ApiError, setAuthToken } from '@/api/client';
 import Input from '@/components/common/Input';
 import Button from '@/components/common/Button';
@@ -17,6 +17,8 @@ const LoginForm = () => {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [notice, setNotice] = useState<string>();
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = location.state as LoginLocationState | null;
@@ -29,6 +31,8 @@ const LoginForm = () => {
         event.preventDefault();
         setSubmitting(true);
         setError(undefined);
+        setNotice(undefined);
+        setNeedsVerification(false);
         try {
           const response = await login({ email, password });
           if (response.user.role !== 'customer') {
@@ -39,6 +43,9 @@ const LoginForm = () => {
           setAuthToken(response.token);
           navigate('/dashboard');
         } catch (err) {
+          if (err instanceof ApiError && err.code === 'email_not_verified') {
+            setNeedsVerification(true);
+          }
           setError(err instanceof ApiError ? err.message : 'Unable to sign in. Please try again.');
         } finally {
           setSubmitting(false);
@@ -63,6 +70,29 @@ const LoginForm = () => {
       {error && (
         <p role="alert" className="rounded-[16px] bg-red-50 px-4 py-2.5 text-[13px] leading-[1.21] text-red-700">
           {error}
+        </p>
+      )}
+      {needsVerification && (
+        <button
+          type="button"
+          className="self-start text-[13px] font-semibold text-primary hover:underline"
+          onClick={async () => {
+            setError(undefined);
+            try {
+              await resendVerification(email);
+              setNotice('A new verification code has been sent to your email.');
+              setNeedsVerification(false);
+            } catch (err) {
+              setError(err instanceof ApiError ? err.message : 'Unable to resend the code. Please try again.');
+            }
+          }}
+        >
+          Resend verification email
+        </button>
+      )}
+      {notice && (
+        <p role="status" className="rounded-[16px] bg-surface-input px-4 py-2.5 text-[13px] leading-[1.21] text-ink">
+          {notice}
         </p>
       )}
 

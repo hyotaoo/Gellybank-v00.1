@@ -42,6 +42,9 @@ BENEFICIARIES_MIGRATION_FILE = BACKEND / "db" / "migrations" / "002_beneficiarie
 LEGACY_COLUMNS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "003_legacy_model_columns.sql"
 CONSENT_MIGRATION_FILE = BACKEND / "db" / "migrations" / "004_consent_columns.sql"
 TX_REQUESTS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "005_transaction_requests.sql"
+CARD_NOTIFICATIONS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "006_card_requests_and_notifications.sql"
+EMAIL_VERIFICATION_MIGRATION_FILE = BACKEND / "db" / "migrations" / "007_email_verification.sql"
+CONSENT_VERSIONS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "008_consent_versions.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 
 DB_NAME = os.environ.get("GELLYBANK_DB_NAME", "gellybank_db")
@@ -100,10 +103,12 @@ required_tables = {
     "account_applications",
     "password_reset_tokens",
     "beneficiaries",
+    "email_verification_tokens",
 }
 admin_schema_ready = (
     required_tables.issubset(tables)
     and "auth_token_version" in user_columns
+    and "email_verified_at" in user_columns
     and "severity" in audit_columns
     and "status" in transaction_columns
     and "created_account_id" in application_columns
@@ -606,6 +611,9 @@ def _run_schema_migrations(connection) -> bool:
             LEGACY_COLUMNS_MIGRATION_FILE,
             CONSENT_MIGRATION_FILE,
             TX_REQUESTS_MIGRATION_FILE,
+            CARD_NOTIFICATIONS_MIGRATION_FILE,
+            EMAIL_VERIFICATION_MIGRATION_FILE,
+            CONSENT_VERSIONS_MIGRATION_FILE,
         ):
             if not migration_file.exists():
                 log_line(f"{relative(migration_file)} is missing.")

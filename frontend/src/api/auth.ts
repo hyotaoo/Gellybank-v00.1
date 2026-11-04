@@ -13,6 +13,9 @@ export interface RegisterInput {
   accountType: 'savings' | 'checking';
   purposeOfAccount: string;
   password: string;
+  acceptTerms: boolean;
+  acceptPrivacy: boolean;
+  acceptAiInsights: boolean;
 }
 
 export interface AuthUser {
@@ -33,8 +36,19 @@ export interface LoginInput {
   password: string;
 }
 
-export const register = (input: RegisterInput): Promise<AuthResponse> =>
-  apiRequest<AuthResponse>('/auth/register', { method: 'POST', body: input });
+export interface RegisterResponse {
+  email: string;
+  message: string;
+}
+
+export const register = (input: RegisterInput): Promise<RegisterResponse> =>
+  apiRequest<RegisterResponse>('/auth/register', { method: 'POST', body: input });
+
+export const verifyEmail = (email: string, code: string): Promise<AuthResponse> =>
+  apiRequest<AuthResponse>('/auth/verify-email', { method: 'POST', body: { email, code } });
+
+export const resendVerification = (email: string): Promise<{ message: string }> =>
+  apiRequest<{ message: string }>('/auth/resend-verification', { method: 'POST', body: { email } });
 
 export const login = (input: LoginInput): Promise<AuthResponse> =>
   apiRequest<AuthResponse>('/auth/login', { method: 'POST', body: input });

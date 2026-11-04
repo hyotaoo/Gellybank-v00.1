@@ -5,12 +5,15 @@ import TellerLoginPage from './pages/auth/TellerLoginPage';
 import AdminLoginPage from './pages/auth/AdminLoginPage';
 import SignUpPage from './pages/auth/SignUpPage';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
+import TermsPage from './pages/legal/TermsPage';
+import PrivacyPage from './pages/legal/PrivacyPage';
 import AdminLayout from './components/admin/AdminLayout';
 import TellerLayout from './components/teller/TellerLayout';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminUsersPage from './pages/admin/AdminUsersPage';
 import AdminApplicationsPage from './pages/admin/AdminApplicationsPage';
 import AdminLogsPage from './pages/admin/AdminLogsPage';
+import AdminBackupsPage from './pages/admin/AdminBackupsPage';
 import TellerDashboardPage from './pages/teller/TellerDashboardPage';
 import TellerRequestsPage from './pages/teller/TellerRequestsPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
@@ -39,6 +42,8 @@ function App() {
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/signup" element={<SignUpPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
 
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
@@ -46,6 +51,7 @@ function App() {
           <Route path="users" element={<AdminUsersPage />} />
           <Route path="applications" element={<AdminApplicationsPage />} />
           <Route path="logs" element={<AdminLogsPage />} />
+          <Route path="backups" element={<AdminBackupsPage />} />
         </Route>
 
         <Route path="/teller" element={<TellerLayout />}>

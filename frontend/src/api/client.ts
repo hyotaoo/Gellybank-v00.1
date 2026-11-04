@@ -36,6 +36,24 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+const errorFromResponse = async (response: Response): Promise<ApiError> => {
+  let message = `Request failed (status ${response.status}).`;
+  let code: string | undefined;
+
+  try {
+    const data: unknown = await response.json();
+    if (data && typeof data === 'object') {
+      const record = data as { message?: unknown; code?: unknown };
+      if (typeof record.message === 'string') message = record.message;
+      if (typeof record.code === 'string') code = record.code;
+    }
+  } catch {
+    // response had no JSON body — keep the default message
+  }
+
+  return new ApiError(message, response.status, code);
+};
+
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, signal } = options;
 
@@ -52,25 +70,21 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     signal,
   });
 
-  if (!response.ok) {
-    let message = `Request failed (status ${response.status}).`;
-    let code: string | undefined;
-
-    try {
-      const data: unknown = await response.json();
-      if (data && typeof data === 'object') {
-        const record = data as { message?: unknown; code?: unknown };
-        if (typeof record.message === 'string') message = record.message;
-        if (typeof record.code === 'string') code = record.code;
-      }
-    } catch {
-      // response had no JSON body — keep the default message
-    }
-
-    throw new ApiError(message, response.status, code);
-  }
+  if (!response.ok) throw await errorFromResponse(response);
 
   if (response.status === 204) return undefined as T;
 
   return (await response.json()) as T;
+}
+
+export async function apiDownload(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(`${API_BASE_URL}${path}`, { headers });
+
+  if (!response.ok) throw await errorFromResponse(response);
+
+  return response.blob();
 }

@@ -3,15 +3,17 @@
 import os
 import random
 import hashlib
+import hmac
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import wraps
+from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -19,6 +21,11 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.security import check_password_hash, generate_password_hash
+
+try:
+    from .email_service import send_verification_code
+except ImportError:
+    from email_service import send_verification_code
 
 
 load_dotenv()
@@ -38,8 +45,16 @@ if not DATABASE_URL:
 
 TOKEN_MAX_AGE = 60 * 60 * 24  
 
+VERIFICATION_TTL = timedelta(minutes=15)
+VERIFICATION_MAX_ATTEMPTS = 5
+VERIFICATION_RESEND_SECONDS = 60
+
+CONSENT_VERSION = "v1.0, 2026-11-03"
+
 DEMO_EMAIL = "demo@gellybank.com"
 DEMO_PASSWORD = "demo12345"
+
+BACKUP_DIR = Path(__file__).resolve().parent.parent / "backups"
 
 # In-memory brute force protection for login attempts
 LOGIN_ATTEMPTS = {}
@@ -269,6 +284,9 @@ class Customer(db.Model):
     status = db.Column(db.String(20), nullable=False, default="ACTIVE")
     terms_accepted_at = db.Column(db.DateTime)
     privacy_accepted_at = db.Column(db.DateTime)
+    consent_version = db.Column(db.String(64))
+    ai_insights_consent = db.Column(db.Boolean, nullable=False, default=False)
+    ai_insights_consent_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=utcnow)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
@@ -287,6 +305,7 @@ class AppUser(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default="CUSTOMER")
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    email_verified_at = db.Column(db.DateTime)
     auth_token_version = db.Column(db.Integer, nullable=False, default=0)
     last_login_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=utcnow)
@@ -435,12 +454,53 @@ class Transaction(db.Model):
         }
 
 
+class Notification(db.Model):
+    __tablename__ = "notifications"
+
+    notification_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.BigInteger, db.ForeignKey("app_users.user_id"), nullable=False)
+    title = db.Column(db.String(120), nullable=False)
+    message = db.Column(db.String(255), nullable=False)
+    category = db.Column(db.String(30), nullable=False, default="SYSTEM")
+    link = db.Column(db.String(255))
+    read_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    def to_dict(self):
+        return {
+            "id": str(self.notification_id),
+            "title": self.title,
+            "message": self.message,
+            "category": self.category.lower(),
+            "link": self.link,
+            "read": self.read_at is not None,
+            "readAt": self.read_at.isoformat() + "Z" if self.read_at else None,
+            "createdAt": self.created_at.isoformat() + "Z" if self.created_at else None,
+        }
+
+
+def push_notification(user_id, title, message, category="SYSTEM", link=None):
+    """Queue an in-app notification; the caller is responsible for committing."""
+    if user_id is None:
+        return
+    db.session.add(Notification(
+        user_id=user_id,
+        title=(title or "").strip()[:120],
+        message=(message or "").strip()[:255],
+        category=category,
+        link=link,
+    ))
+
+
 class BankCard(db.Model):
     __tablename__ = "bank_cards"
 
     card_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"), nullable=False)
+    provider = db.Column(db.String(30), nullable=False, default="GellyBank")
     card_number_token_or_last4 = db.Column(db.String(100), nullable=False, unique=True)
+    card_number = db.Column(db.String(19), unique=True)
+    cvv = db.Column(db.String(4))
     card_type = db.Column(db.String(20), nullable=False, default="DEBIT")  
     status = db.Column(db.String(20), nullable=False, default="ACTIVE")
     issued_at = db.Column(db.DateTime, default=utcnow)
@@ -449,11 +509,17 @@ class BankCard(db.Model):
     cancelled_at = db.Column(db.DateTime)
 
     def to_dict(self):
+        number = self.card_number or self.card_number_token_or_last4
         return {
             "id": str(self.card_id),
+            "accountId": str(self.account_id),
             "type": self.card_type.lower(),
-            "last4": self.card_number_token_or_last4,
+            "last4": number[-4:] if number else None,
+            "cardNumber": self.card_number,
+            "cvv": self.cvv,
             "status": self.status.lower(),
+            "expiresOn": self.expires_on.isoformat() if self.expires_on else None,
+            "issuedAt": self.issued_at.isoformat() + "Z" if self.issued_at else None,
         }
 
 
@@ -594,6 +660,19 @@ class PasswordResetToken(db.Model):
         db.BigInteger, db.ForeignKey("app_users.user_id", ondelete="CASCADE"), nullable=False
     )
     token_hash = db.Column(db.String(64), nullable=False, unique=True)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+
+class EmailVerificationToken(db.Model):
+    __tablename__ = "email_verification_tokens"
+
+    verification_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
+    user_id = db.Column(
+        db.BigInteger, db.ForeignKey("app_users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    code_hash = db.Column(db.String(64), nullable=False)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
     expires_at = db.Column(db.DateTime, nullable=False)
     created_at = db.Column(db.DateTime, default=utcnow)
 
@@ -944,6 +1023,38 @@ def admin_list_logs():
     return jsonify([entry.to_dict() for entry in entries])
 
 
+@app.get("/api/admin/backups")
+@admin_required
+def admin_list_backups():
+    if not BACKUP_DIR.is_dir():
+        return jsonify([])
+    backups = []
+    for path in sorted(BACKUP_DIR.glob("*.sql"), key=lambda entry: entry.stat().st_mtime, reverse=True):
+        stat = path.stat()
+        backups.append({
+            "name": path.name,
+            "size": stat.st_size,
+            "createdAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        })
+    return jsonify(backups)
+
+
+@app.get("/api/admin/backups/<filename>")
+@admin_required
+def admin_download_backup(filename):
+    if Path(filename).name != filename or not filename.endswith(".sql"):
+        return error("Backup file not found.", 404, "not_found")
+    path = (BACKUP_DIR / filename).resolve()
+    if path.parent != BACKUP_DIR.resolve() or not path.is_file():
+        return error("Backup file not found.", 404, "not_found")
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=path.name,
+        mimetype="application/sql",
+    )
+
+
 def account_with_owner(account):
     customer = db.session.get(Customer, account.customer_id)
     return {
@@ -1231,6 +1342,14 @@ def process_deposit_withdraw(user, account, kind, amount, note):
             performed_by_user_id=user.user_id,
         )
         db.session.add(tx)
+        label = "Deposit" if kind == "deposit" else "Withdrawal"
+        push_notification(
+            locked.customer_id,
+            f"{label} completed",
+            f"{label} of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was processed. New balance: {DEFAULT_CURRENCY} {as_number(locked.current_balance):,.2f}.",
+            category="TRANSACTION",
+            link="/dashboard/history",
+        )
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -1387,6 +1506,35 @@ def create_transfer():
         db.session.rollback()
         return error("Transfer failed. Please try again.", 500, "transfer_failed")
 
+    push_notification(
+        locked_source.customer_id,
+        "Money sent",
+        f"Transfer of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was sent. Reference: {reference}.",
+        category="TRANSACTION",
+        link="/dashboard/history",
+    )
+    if locked_destination:
+        push_notification(
+            locked_destination.customer_id,
+            "Money received",
+            f"Transfer of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was received. Reference: {reference}.",
+            category="TRANSACTION",
+            link="/dashboard/history",
+        )
+    else:
+        beneficiary_account = BankAccount.query.filter_by(
+            account_number=beneficiary.account_number
+        ).first()
+        if beneficiary_account:
+            push_notification(
+                beneficiary_account.customer_id,
+                "Money received",
+                f"Transfer of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was received. Reference: {reference}.",
+                category="TRANSACTION",
+                link="/dashboard/history",
+            )
+    db.session.commit()
+
     return jsonify(tx.to_dict()), 201
 
 
@@ -1444,8 +1592,31 @@ def create_request():
         return error("This account is not active.", 400, "account_inactive")
 
     kind = str(data.get("type") or "").lower()
-    if kind not in ("deposit", "withdraw"):
-        return error("Type must be 'deposit' or 'withdraw'.", 400, "invalid_type")
+    if kind not in ("deposit", "withdraw", "card"):
+        return error("Type must be 'deposit', 'withdraw', or 'card'.", 400, "invalid_type")
+
+    if kind == "card":
+        request_row = TransactionRequest(
+            customer_id=user.customer_id,
+            account_id=account.account_id,
+            requested_by_user_id=user.user_id,
+            transaction_type="CARD",
+            amount=Decimal("0.00"),
+            note=(data.get("note") or "").strip() or None,
+        )
+        db.session.add(request_row)
+        push_notification(
+            user.user_id,
+            "Card request sent",
+            f"Your new card request for {account.type_name} account was sent to the teller for approval.",
+            category="CARD",
+            link="/dashboard/requests",
+        )
+        db.session.commit()
+
+        result = request_row.to_dict()
+        result["label"] = result["accountLabel"]
+        return jsonify(result), 201
 
     try:
         amount = check_amount(data.get("amount"))
@@ -1480,6 +1651,14 @@ def create_request():
         note=(data.get("note") or "").strip() or None,
     )
     db.session.add(request_row)
+    label = "Withdrawal" if kind == "withdraw" else "Deposit"
+    push_notification(
+        user.user_id,
+        f"{label} request sent",
+        f"Your {label.lower()} request of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was sent to the teller for approval.",
+        category="REQUEST",
+        link="/dashboard/requests",
+    )
     db.session.commit()
 
     result = request_row.to_dict()
@@ -1678,6 +1857,39 @@ def teller_approve_request(request_id):
     if not account:
         return error("The account for this request no longer exists.", 409, "no_account")
 
+    if row.transaction_type == "CARD":
+        existing = (
+            BankCard.query
+            .filter_by(account_id=account.account_id, status="ACTIVE")
+            .order_by(BankCard.card_id.desc())
+            .first()
+        )
+        if existing:
+            existing.status = "CANCELLED"
+            existing.cancelled_at = utcnow()
+        card = issue_card_for_account(account)
+        db.session.commit()
+
+        row.status = "APPROVED"
+        row.reviewed_by_user_id = user.user_id
+        row.reviewed_at = utcnow()
+        log_audit(
+            "REQUEST_APPROVED",
+            "TRANSACTION_REQUEST",
+            entity_id=row.request_id,
+            actor_user_id=user.user_id,
+            details={"type": "CARD", "accountId": str(row.account_id)},
+        )
+        push_notification(
+            row.requested_by_user_id,
+            "New card issued",
+            f"Your card request was approved. Debit card ending in {card.card_number[-4:]} is ready to use.",
+            category="CARD",
+            link="/dashboard",
+        )
+        db.session.commit()
+        return jsonify(row.to_dict(include_customer=True))
+
     kind = "withdraw" if row.transaction_type == "WITHDRAWAL" else "deposit"
     result = process_deposit_withdraw(user, account, kind, row.amount, row.note)
     if isinstance(result, tuple):
@@ -1700,6 +1912,13 @@ def teller_approve_request(request_id):
             "accountId": str(row.account_id),
             "transactionId": str(result.transaction_id),
         },
+    )
+    push_notification(
+        row.requested_by_user_id,
+        "Request approved",
+        f"Your {kind} request of {DEFAULT_CURRENCY} {as_number(row.amount):,.2f} was approved by the teller.",
+        category="REQUEST",
+        link="/dashboard/requests",
     )
     db.session.commit()
     return jsonify(row.to_dict(include_customer=True))
@@ -1735,6 +1954,16 @@ def teller_reject_request(request_id):
         actor_user_id=user.user_id,
         severity="WARN",
         details={"type": row.transaction_type, "reason": reason},
+    )
+    kind_label = "Card" if row.transaction_type == "CARD" else (
+        "Withdrawal" if row.transaction_type == "WITHDRAWAL" else "Deposit"
+    )
+    push_notification(
+        row.requested_by_user_id,
+        "Request rejected",
+        f"Your {kind_label.lower()} request was rejected. Reason: {reason}",
+        category="REQUEST",
+        link="/dashboard/requests",
     )
     db.session.commit()
     return jsonify(row.to_dict(include_customer=True))
@@ -1820,6 +2049,91 @@ def delete_beneficiary(ben_id):
     return "", 204
 
 
+def issue_card_for_account(account):
+    """Generate, add (uncommitted), and return a new debit card for an account."""
+    while True:
+        number = "5476" + f"{random.randint(0, 999999999999):012d}"
+        if not BankCard.query.filter_by(card_number=number).first():
+            break
+
+    cvv = f"{random.randint(1, 999):03d}"
+
+    last4 = None
+    for _ in range(20):
+        candidate = number[-4:]
+        if not BankCard.query.filter_by(card_number_token_or_last4=candidate).first():
+            last4 = candidate
+            break
+    if last4 is None:
+        last4 = f"{random.randint(0, 999999):06d}"
+
+    today = utcnow().date()
+    expiry_year = today.year + 3
+    try:
+        expires_on = today.replace(year=expiry_year)
+    except ValueError:
+        expires_on = today.replace(year=expiry_year, day=28)
+
+    card = BankCard(
+        account_id=account.account_id,
+        card_number_token_or_last4=last4,
+        card_number=number,
+        cvv=cvv,
+        expires_on=expires_on,
+    )
+    db.session.add(card)
+    return card
+
+
+@app.get("/api/cards")
+@authenticated_required
+def list_cards():
+    user = current_user()
+    if not user.customer_id:
+        return jsonify([])
+
+    accounts = BankAccount.query.filter_by(customer_id=user.customer_id).all()
+    wanted = None
+    if request.args.get("accountId"):
+        wanted = as_int(request.args.get("accountId"))
+        accounts = [a for a in accounts if a.account_id == wanted]
+
+    customer = user.customer
+
+    items = []
+    changed = False
+    for account in accounts:
+        if account.status != "ACTIVE":
+            continue
+        card = (
+            BankCard.query
+            .filter_by(account_id=account.account_id, status="ACTIVE")
+            .order_by(BankCard.card_id.desc())
+            .first()
+        )
+        if card is None or not card.card_number:
+            if card is not None:
+                card.status = "CANCELLED"
+                card.cancelled_at = utcnow()
+            card = issue_card_for_account(account)
+            changed = True
+            db.session.flush()
+            push_notification(
+                user.user_id,
+                "New card issued",
+                f"Debit card ending in {card.card_number[-4:]} was issued for your {account.type_name} account.",
+                category="CARD",
+                link="/dashboard",
+            )
+        data = card.to_dict()
+        data["holder"] = customer.full_name if customer else ""
+        data["accountNumber"] = account.account_number
+        items.append(data)
+
+    if changed:
+        db.session.commit()
+    return jsonify(items)
+
 
 @app.post("/api/cards/request")
 @authenticated_required
@@ -1862,6 +2176,49 @@ def request_card():
     db.session.add(card)
     db.session.commit()
     return jsonify(card.to_dict()), 201
+
+
+@app.get("/api/notifications")
+@authenticated_required
+def list_notifications():
+    user = current_user()
+    rows = (
+        Notification.query
+        .filter_by(user_id=user.user_id)
+        .order_by(Notification.created_at.desc(), Notification.notification_id.desc())
+        .limit(30)
+        .all()
+    )
+    unread = Notification.query.filter_by(user_id=user.user_id, read_at=None).count()
+    return jsonify({"unread": unread, "items": [n.to_dict() for n in rows]})
+
+
+@app.post("/api/notifications/<notification_id>/read")
+@authenticated_required
+def mark_notification_read(notification_id):
+    user = current_user()
+    row = Notification.query.filter_by(
+        notification_id=as_int(notification_id), user_id=user.user_id
+    ).first()
+    if not row:
+        return error("Notification not found.", 404, "not_found")
+    if row.read_at is None:
+        row.read_at = utcnow()
+        db.session.commit()
+    return jsonify(row.to_dict())
+
+
+@app.post("/api/notifications/read-all")
+@authenticated_required
+def mark_all_notifications_read():
+    user = current_user()
+    rows = Notification.query.filter_by(user_id=user.user_id, read_at=None).all()
+    if rows:
+        now = utcnow()
+        for row in rows:
+            row.read_at = now
+        db.session.commit()
+    return jsonify({"updated": len(rows)})
 
 
 
@@ -1913,6 +2270,13 @@ def spending():
 
 
 
+def validate_password(password):
+    """Return (message, code) when a password is weak, or (None, None) when valid."""
+    if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
+        return "Password needs 8+ characters with a letter and a number.", "weak_password"
+    return None, None
+
+
 def parse_date(value):
     try:
         return datetime.strptime(str(value), "%Y-%m-%d").date()
@@ -1925,6 +2289,42 @@ def join_phone(country_code, phone):
     return combined[:20] or None
 
 
+NAME_PUNCTUATION = {" ", "-", "'", "."}
+
+
+def validate_person_name(value, label, required=True):
+    """Return an error message for an invalid person name, or None when valid."""
+    if not value:
+        return f"{label} is required." if required else None
+    if len(value) < 2:
+        return f"{label} must be at least 2 characters."
+    if len(value) > 50:
+        return f"{label} must be 50 characters or fewer."
+    if not all(ch.isalpha() or ch in NAME_PUNCTUATION for ch in value):
+        return f"{label} can only contain letters, spaces, hyphens, apostrophes, and periods."
+    return None
+
+
+def new_verification_code():
+    return str(secrets.randbelow(900000) + 100000)
+
+
+def verification_code_hash(user_id, code):
+    payload = f"{user_id}:{code}:{SECRET_KEY}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def issue_verification_code(user):
+    code = new_verification_code()
+    EmailVerificationToken.query.filter_by(user_id=user.user_id).delete()
+    db.session.add(EmailVerificationToken(
+        user_id=user.user_id,
+        code_hash=verification_code_hash(user.user_id, code),
+        expires_at=utcnow() + VERIFICATION_TTL,
+    ))
+    return code
+
+
 @app.post("/api/auth/register")
 def register():
     data = body()
@@ -1933,8 +2333,9 @@ def register():
 
     if "@" not in email or "." not in email:
         return error("Enter a valid email address.", 400, "invalid_email")
-    if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
-        return error("Password needs 8+ characters with a letter and a number.", 400, "weak_password")
+    message, code = validate_password(password)
+    if message:
+        return error(message, 400, code)
     if not data.get("acceptTerms"):
         return error("You must agree to the Terms of Agreement.", 400, "terms_not_accepted")
     if not data.get("acceptPrivacy"):
@@ -1942,16 +2343,33 @@ def register():
     if AppUser.query.filter_by(username=email).first() or Customer.query.filter_by(email=email).first():
         return error("An account with that email already exists.", 409, "email_taken")
 
+    first_name = (data.get("firstName") or "").strip()
+    middle_name = (data.get("middleName") or "").strip()
+    last_name = (data.get("lastName") or "").strip()
+    for label, value, is_required in (
+        ("First name", first_name, True),
+        ("Middle name", middle_name, False),
+        ("Last name", last_name, True),
+    ):
+        message = validate_person_name(value, label, required=is_required)
+        if message:
+            return error(message, 400, "invalid_name")
+
+    accepted_at = utcnow()
+    ai_insights_consent = bool(data.get("acceptAiInsights"))
     customer = Customer(
-        first_name=(data.get("firstName") or "").strip(),
-        middle_name=(data.get("middleName") or "").strip() or None,
-        last_name=(data.get("lastName") or "").strip(),
+        first_name=first_name,
+        middle_name=middle_name or None,
+        last_name=last_name,
         date_of_birth=parse_date(data.get("birthdate")),
         email=email,
         phone=join_phone(data.get("countryCode"), data.get("phone")),
         address=(data.get("address") or "").strip() or None,
-        terms_accepted_at=utcnow(),
-        privacy_accepted_at=utcnow(),
+        terms_accepted_at=accepted_at,
+        privacy_accepted_at=accepted_at,
+        consent_version=CONSENT_VERSION,
+        ai_insights_consent=ai_insights_consent,
+        ai_insights_consent_at=accepted_at if ai_insights_consent else None,
     )
     db.session.add(customer)
     db.session.flush()  
@@ -1963,9 +2381,97 @@ def register():
         role="CUSTOMER",
     )
     db.session.add(user)
-    db.session.commit()
+    db.session.flush()
 
-    return jsonify({"user": user.to_dict(), "token": make_token(user)}), 201
+    code = issue_verification_code(user)
+    try:
+        send_verification_code(email, code)
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Could not send verification email to %s", email)
+        return error(
+            "We could not send the verification email. Please try again later.",
+            503,
+            "email_delivery_failed",
+        )
+
+    db.session.commit()
+    return jsonify({
+        "email": email,
+        "message": "We sent a verification code to your email address.",
+    }), 201
+
+
+@app.post("/api/auth/verify-email")
+def verify_email():
+    data = body()
+    email = (data.get("email") or "").strip().lower()
+    code = str(data.get("code") or "").strip()
+
+    if len(code) != 6 or not code.isdigit():
+        return error("Enter the 6-digit code.", 400, "invalid_verification_code")
+
+    user = AppUser.query.filter_by(username=email).first()
+    if not user:
+        return error("That code is incorrect or has expired.", 400, "invalid_verification_code")
+    if user.email_verified_at is not None:
+        return error("That email address is already verified.", 409, "email_already_verified")
+
+    record = (
+        EmailVerificationToken.query
+        .filter_by(user_id=user.user_id)
+        .order_by(EmailVerificationToken.verification_id.desc())
+        .first()
+    )
+    if not record or record.expires_at <= utcnow():
+        return error("That code is incorrect or has expired.", 400, "invalid_verification_code")
+    if record.attempts >= VERIFICATION_MAX_ATTEMPTS:
+        return error("Too many attempts. Request a new code.", 429, "too_many_attempts")
+
+    if not hmac.compare_digest(record.code_hash, verification_code_hash(user.user_id, code)):
+        record.attempts += 1
+        db.session.commit()
+        return error("That code is incorrect or has expired.", 400, "invalid_verification_code")
+
+    user.email_verified_at = utcnow()
+    EmailVerificationToken.query.filter_by(user_id=user.user_id).delete()
+    db.session.commit()
+    return jsonify({"user": user.to_dict(), "token": make_token(user)})
+
+
+@app.post("/api/auth/resend-verification")
+def resend_verification():
+    data = body()
+    email = (data.get("email") or "").strip().lower()
+    message = {"message": "If that account needs verification, a new code has been sent."}
+
+    user = AppUser.query.filter_by(username=email).first()
+    if not user or user.email_verified_at is not None:
+        return jsonify(message)
+
+    latest = (
+        EmailVerificationToken.query
+        .filter_by(user_id=user.user_id)
+        .order_by(EmailVerificationToken.verification_id.desc())
+        .first()
+    )
+    if latest and (utcnow() - latest.created_at).total_seconds() < VERIFICATION_RESEND_SECONDS:
+        return jsonify(message)
+
+    code = issue_verification_code(user)
+    try:
+        send_verification_code(email, code)
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Could not resend verification email to %s", email)
+        return error(
+            "We could not send the verification email. Please try again later.",
+            503,
+            "email_delivery_failed",
+        )
+
+    db.session.commit()
+    return jsonify(message)
 
 
 @app.post("/api/auth/login")
@@ -2030,6 +2536,13 @@ def login():
         db.session.commit()
         return error("Invalid email or password.", 401, "invalid_credentials")
 
+    if user.email_verified_at is None:
+        return error(
+            "Verify your email address before signing in.",
+            403,
+            "email_not_verified",
+        )
+
     user.last_login_at = utcnow()
     clear_login_attempts(email, ip_address)
     db.session.commit()
@@ -2070,10 +2583,12 @@ def update_profile():
     field_keys = [("first_name", "firstName"), ("middle_name", "middleName"), ("last_name", "lastName")]
     for field, key in field_keys:
         if key in data:
-            value = str(data[key] or "").strip()[:50] or None
-            if field in ("first_name", "last_name") and not value:
-                return error(f"{'First' if field == 'first_name' else 'Last'} name cannot be empty.", 400, "invalid_input")
-            setattr(customer, field, value)
+            value = str(data[key] or "").strip()
+            label = "First name" if field == "first_name" else ("Middle name" if field == "middle_name" else "Last name")
+            message = validate_person_name(value, label, required=field != "middle_name")
+            if message:
+                return error(message, 400, "invalid_name")
+            setattr(customer, field, value or None)
             updates.append(key)
     if "phone" in data:
         customer.phone = join_phone(None, data.get("phone"))[:20] or None
@@ -2115,8 +2630,9 @@ def change_password():
 
     if not check_password(user.password_hash, current_password):
         return error("Your current password is incorrect.", 401, "wrong_password")
-    if len(new_password) < 8 or not any(c.isalpha() for c in new_password) or not any(c.isdigit() for c in new_password):
-        return error("Password needs 8+ characters with a letter and a number.", 400, "weak_password")
+    message, code = validate_password(new_password)
+    if message:
+        return error(message, 400, code)
 
     user.password_hash = hash_password(new_password)
     user.auth_token_version += 1
@@ -2135,8 +2651,9 @@ def reset_password():
     data = body()
     token = str(data.get("token") or "")
     password = str(data.get("password") or "")
-    if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
-        return error("Password needs 8+ characters with a letter and a number.", 400, "weak_password")
+    message, code = validate_password(password)
+    if message:
+        return error(message, 400, code)
 
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     reset = PasswordResetToken.query.filter_by(token_hash=token_hash).with_for_update().first()
@@ -2216,6 +2733,7 @@ def add_demo_data():
         username=DEMO_EMAIL,  
         password_hash=hash_password(DEMO_PASSWORD),
         role="CUSTOMER",
+        email_verified_at=utcnow(),
     )
     db.session.add(user)
     db.session.flush()
