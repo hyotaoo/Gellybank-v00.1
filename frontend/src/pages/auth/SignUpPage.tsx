@@ -7,7 +7,6 @@ import SignupLayout from '@/components/auth/SignupLayout';
 import SignupStepOne from '@/components/auth/SignupStepOne';
 import SignupStepThree from '@/components/auth/SignupStepThree';
 import SignupStepTwo from '@/components/auth/SignupStepTwo';
-import VerifyEmailCard from '@/components/auth/VerifyEmailCard';
 import { emptySignupValues, validateStep } from '@/components/auth/signup';
 import type {
   SignupErrors,
@@ -64,51 +63,38 @@ const SignUpPage = () => {
   const [values, setValues] = useState<SignupValues>(emptySignupValues);
   const [errors, setErrors] = useState<SignupErrors>({});
   const [step, setStep] = useState<SignupStep>(1);
-  const [verifying, setVerifying] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string>();
 
   const update = <K extends SignupFieldKey,>(field: K, value: SignupValues[K]) => {
     setValues((current) => ({ ...current, [field]: value }));
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
 
-  const submit = () => {
-    let current = values;
-    // In demo mode: auto-fill required fields with random dummy data so every page is testable
-    const isDemo = typeof import.meta !== 'undefined' && import.meta.env?.VITE_DEMO_MODE === 'true';
-    if (isDemo) {
-      const v = { ...current };
-      const random = (len = 8) => Math.random().toString(36).slice(2, 2 + len);
-      if (!v.firstName.trim()) v.firstName = 'Demo';
-      if (!v.lastName.trim()) v.lastName = 'User';
-      if (!v.email.trim()) v.email = `demo${random(4)}@example.com`;
-      if (!v.phone.trim()) v.phone = '555-0199';
-      if (!v.address.trim()) v.address = '123 Demo St';
-      if (!v.city.trim()) v.city = 'Demo City';
-      if (!v.state.trim()) v.state = 'CA';
-      if (!v.zip.trim()) v.zip = '90210';
-      if (!v.birthdate.trim()) v.birthdate = '1990-01-01';
-      if (!v.password.trim()) v.password = 'DemoPass123!';
-      if (!v.confirmPassword.trim()) v.confirmPassword = v.password;
-      if (!v.employmentStatus.trim()) v.employmentStatus = 'Full-Time';
-      if (!v.occupation.trim()) v.occupation = 'Tester';
-      if (!v.annualIncome.trim()) v.annualIncome = 'Over $100,000';
-      if (!v.sourceOfFunds.trim()) v.sourceOfFunds = 'Employment Income';
-      if (!v.accountType.trim()) v.accountType = 'Checking';
-      if (!v.purposeOfAccount.trim()) v.purposeOfAccount = 'Everyday Purchases';
-      v.agreeTerms = true;
-      v.agreePrivacy = true;
-      v.agreeInsights = true;
-      current = v;
-      setValues(current);
-    }
+  const submit = async () => {
+    const current = values;
     const nextErrors = validateStep(step, current);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
     if (step < 3) {
       setStep((step + 1) as SignupStep);
-    } else {
-      setVerifying(true);
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitError(undefined);
+    try {
+      await register(toRegisterInput(values));
+      navigate('/signin', {
+        state: { registered: true, email: values.email.trim().toLowerCase() },
+      });
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : 'Unable to create your account. Please try again.',
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -116,28 +102,6 @@ const SignUpPage = () => {
     setErrors({});
     if (step > 1) setStep((step - 1) as SignupStep);
   };
-
-  if (verifying) {
-    const completeRegistration = async () => {
-      await register(toRegisterInput(values));
-      navigate('/signin', {
-        state: { registered: true, email: values.email.trim().toLowerCase() },
-      });
-    };
-
-    return (
-      <SignupLayout centered>
-        <VerifyEmailCard
-          email={values.email}
-          onChangeEmail={() => {
-            setVerifying(false);
-            setStep(1);
-          }}
-          onVerify={completeRegistration}
-        />
-      </SignupLayout>
-    );
-  }
 
   const canCreate = values.agreeTerms && values.agreePrivacy;
 
@@ -148,7 +112,7 @@ const SignUpPage = () => {
           className="flex flex-col gap-3"
           onSubmit={(event) => {
             event.preventDefault();
-            submit();
+            void submit();
           }}
         >
           {step === 1 && <SignupStepOne values={values} errors={errors} update={update} />}
@@ -170,14 +134,19 @@ const SignUpPage = () => {
               <>
                 <button
                   type="submit"
-                  disabled={!canCreate}
+                  disabled={!canCreate || submitting}
                   className={canCreate ? PRIMARY_BUTTON : DISABLED_BUTTON}
                 >
-                  Create account
+                  {submitting ? 'Creating account…' : 'Create account'}
                 </button>
                 {!canCreate && (
                   <p className="text-center text-[14px] font-normal leading-[17px] text-[#6E6168]">
                     Agree to both required statements to create your account.
+                  </p>
+                )}
+                {submitError && (
+                  <p role="alert" className="text-center text-[14px] leading-[17px] text-red-600">
+                    {submitError}
                   </p>
                 )}
               </>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { getAuthUser } from '@/api/auth';
 import CircleCheckIcon from '@/components/icons/CircleCheckIcon';
-import CopyButton from '@/components/common/CopyButton';
 import CreditCardIcon from '@/components/icons/CreditCardIcon';
 import DepositIcon from '@/components/icons/DepositIcon';
 import EyeOffIcon from '@/components/icons/EyeOffIcon';
@@ -25,14 +25,6 @@ const quickActions: QuickAction[] = [
   { label: 'Withdraw', to: '/dashboard/withdraw', icon: <WithdrawIcon className="h-6 w-6" /> },
 ];
 
-const CARD = {
-  type: 'Debit',
-  number: '5476 8102 4450 3388',
-  holder: 'JHAMEL ROSE SUMAGUE',
-  validity: '08/29',
-  cvv: '337',
-};
-
 const controlButtonClass =
   'flex h-11 w-11 flex-none items-center justify-center rounded-full bg-white/[0.16] transition-colors hover:bg-white/[0.24] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70';
 
@@ -44,6 +36,9 @@ const BalanceCard = () => {
   const [flipped, setFlipped] = useState(false);
   const [balanceHidden, setBalanceHidden] = useState(false);
   const { selectedAccount } = useAccounts();
+  const user = getAuthUser();
+  const cardHolder =
+    [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || 'Card holder';
 
   const balanceLabel = selectedAccount
     ? formatCurrency(selectedAccount.balance, selectedAccount.currency)
@@ -139,7 +134,7 @@ const BalanceCard = () => {
               </span>
               <span className="text-[36px] font-bold leading-[43px]">Card details</span>
               <span className="flex h-[23px] flex-none items-center gap-1.5 rounded-full bg-white/[0.16] px-3 text-[14px] font-semibold leading-[17px]">
-                {CARD.type}
+                Account
               </span>
             </div>
             <button
@@ -157,14 +152,8 @@ const BalanceCard = () => {
             <span className="block h-8 w-11 rounded-[7px] bg-white/[0.3]" />
             <div className="mt-3 flex items-center gap-3">
               <span className="text-[36px] font-semibold leading-[43px] tracking-[0.14em]">
-                {CARD.number}
+                •••• •••• •••• ••••
               </span>
-              <CopyButton
-                value={CARD.number.replace(/\s/g, '')}
-                label="Copy card number"
-                tone="light"
-                className="bg-white/[0.16] p-2 hover:bg-white/[0.24]"
-              />
             </div>
           </div>
 
@@ -174,19 +163,19 @@ const BalanceCard = () => {
                 <p className="text-[14px] uppercase leading-[17px] tracking-[0.08em] text-white/85">
                   Card holder
                 </p>
-                <p className="mt-1 text-[20px] font-semibold leading-[24px]">{CARD.holder}</p>
+                <p className="mt-1 text-[20px] font-semibold leading-[24px]">{cardHolder}</p>
               </div>
               <div>
                 <p className="text-[14px] uppercase leading-[17px] tracking-[0.08em] text-white/85">
                   Validity
                 </p>
-                <p className="mt-1 text-[20px] font-semibold leading-[24px]">{CARD.validity}</p>
+                <p className="mt-1 text-[20px] font-semibold leading-[24px]">••/••</p>
               </div>
               <div>
                 <p className="text-[14px] uppercase leading-[17px] tracking-[0.08em] text-white/85">
                   CVV
                 </p>
-                <p className="mt-1 text-[20px] font-semibold leading-[24px]">{CARD.cvv}</p>
+                <p className="mt-1 text-[20px] font-semibold leading-[24px]">•••</p>
               </div>
             </div>
             <span className="text-[16px] font-semibold leading-[19px] text-white/90">GellyBank</span>

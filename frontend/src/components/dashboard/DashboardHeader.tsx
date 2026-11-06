@@ -13,8 +13,6 @@ import NotificationItem from '@/components/dashboard/NotificationItem';
 import { useAccounts } from '@/context/AccountContext';
 import { useNotifications } from '@/context/NotificationContext';
 
-const FALLBACK_NAME = 'JHAMEL ROSE SUMAGUE';
-
 type HeaderMenu = 'profile' | 'notifications' | null;
 
 interface DashboardHeaderProps {
@@ -43,7 +41,7 @@ const DashboardHeader = ({ title = 'Dashboard' }: DashboardHeaderProps) => {
   const accountNumber = last4(selectedAccount?.accountNumber);
   const user = getAuthUser();
   const displayName =
-    [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || FALLBACK_NAME;
+    [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || 'Account holder';
   const [openMenu, setOpenMenu] = useState<HeaderMenu>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -231,7 +229,7 @@ const DashboardHeader = ({ title = 'Dashboard' }: DashboardHeaderProps) => {
                   {displayName}
                 </p>
                 <p className="truncate text-[12px] leading-[15px] text-muted">
-                  {user?.email ?? 'demo@gellybank.com'}
+                  {user?.email ?? '—'}
                 </p>
               </div>
 

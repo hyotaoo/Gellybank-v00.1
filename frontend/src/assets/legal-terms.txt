@@ -1,0 +1,190 @@
+Part A: Terms of Agreement
+
+1. Acceptance
+By ticking the agreement box and creating an account, you agree to these Terms with Gelly Bank ("Gelly Bank", "we", "us"). If you do not agree, do not create an account. These Terms apply to every Gelly Bank service you use, including the website, the customer dashboard and any related notification.
+
+2. Who may open an account
+To open an account you must:
+• be at least 18 years old;
+• provide true, complete and current personal information, and keep it updated;
+• open and use the account only for yourself, never on behalf of someone else;
+• complete any identity verification we require.
+We may refuse an application, or ask for more information, without being obliged to give a reason beyond what is shown in your application status.
+
+3. User roles
+Gelly Bank has three kinds of users, each with limited powers.
+
+Role: Customer
+What they can do: View balances and history, request deposits and withdrawals, transfer funds, apply for more accounts, manage personal details and security
+What they cannot do: Approve their own requests or see other customers' accounts
+
+Role: Teller
+What they can do: Look up customer accounts, verify identity and cash, approve or reject deposit and withdrawal requests, record the final status
+What they cannot do: Change balances arbitrarily or change system settings
+
+Role: Admin
+What they can do: Create and deactivate Teller accounts, review and decide account applications, monitor transactions, view summary reports
+What they cannot do: Process customer transactions, or silently edit or delete transaction amounts and records
+
+4. Opening an account
+You submit an application for a Savings or Checking account with the required information.
+An Admin reviews it and either approves it, rejects it with a stated reason, or asks for more information.
+The account becomes usable only after approval. You can track the status and read any rejection reason in your dashboard.
+After approval you may apply for additional Savings or Checking accounts using the same process.
+Only one person may use one account, and you may not sell, rent or transfer your account to anyone.
+
+5. Deposits
+Deposits are cash deposits confirmed by a Teller.
+You submit a deposit request, choosing the receiving account and amount, with an optional note.
+The request enters the Teller's queue as PENDING.
+You present the cash to a Teller, who verifies the amount and the receiving account.
+When the Teller confirms the deposit, the system credits the account and marks the transaction COMPLETED.
+Your balance does not change until the Teller confirms. If the cash presented differs from the amount requested, or the request cannot be verified, the Teller may reject it and record the reason.
+
+6. Withdrawals
+You submit a withdrawal request for a chosen account and amount.
+The system checks your available balance and applicable limits.
+A Teller verifies your identity and the request, then approves or rejects it.
+After approval, you receive the cash and the Teller confirms disbursement. Only then is the withdrawal recorded as COMPLETED.
+A request that exceeds your available balance or limits, or whose identity check fails, will be rejected. You will see a reference number for every completed withdrawal.
+
+7. Transfers
+Transfers between accounts are electronic and do not wait for a Teller.
+You enter the recipient's account number. The system shows the verified recipient name before you continue. Check it carefully.
+You review the amount, any fee and the details, then confirm with your PIN or another authentication step.
+The system validates the recipient, balance and limits, and then processes the transfer as one all-or-nothing operation. Both accounts and both transaction records are updated together, or neither is.
+You receive a confirmation once the transfer is completed.
+A confirmed transfer is final. Gelly Bank cannot recall funds sent to an account number you entered correctly. If you believe a transfer was unauthorised or sent in error, report it immediately under Section 12.
+
+8. Transaction statuses and records
+Every request carries one of four statuses.
+
+PENDING: You submitted the request and Teller action is still needed
+COMPLETED: The financial operation was successfully executed
+REJECTED: The request was declined, and the reason is recorded
+CANCELLED: The request was cancelled before it was executed
+
+Each transaction receives a reference number. Our records, including the Teller who processed a transaction, are kept as the official record of your activity. Staff cannot silently edit an amount or delete a record. If you find an error, tell us and it will be corrected through a recorded entry.
+
+9. Your security responsibilities
+Keep your password and PIN secret. Never share them, even with someone who says they are from Gelly Bank. We will never ask for them.
+Choose a strong password you do not use elsewhere, and change it if you suspect it is known to someone else.
+Review your notifications and transaction history regularly.
+Sign out after each session, especially on shared devices.
+Tell us immediately if you notice a transaction you did not make, or if your credentials may be compromised.
+Activity done with your credentials is treated as done by you, unless you reported the compromise before it happened or we were at fault.
+
+10. AI Insights
+AI Insights shows spending breakdowns, trends, budget suggestions, unusual-spending alerts and savings tips based on your own transaction records.
+AI-generated suggestions are general information, not financial, tax or investment advice. Decide for yourself whether to act on them.
+Your balances, statuses and transaction records are the verified banking information. Insights and categories may be estimated and can be wrong.
+An unusual-spending alert is not proof of fraud. If you did not make a transaction, report it under Section 12.
+How your data is used for this feature is explained in Part B.
+
+11. Prohibited use
+You must not:
+• use your account for fraud, money laundering, terrorist financing or any other unlawful purpose;
+• give false identity details or open accounts under another person's identity;
+• access or try to access another user's account, or any part of the system you are not permitted to use;
+• interfere with the system, for example by scanning for weaknesses, overloading it, or bypassing limits and authentication;
+• use bots, scripts or other tools to submit requests in a way that disrupts service;
+• help anyone else do any of the above.
+
+12. Reporting problems and disputes
+Report unauthorised or mistaken transactions, lost credentials or suspected fraud as soon as you notice them, using the contact details in Section 18. Include the reference number, date and amount. We will acknowledge your report, investigate, and tell you the outcome and any correction made. Reports made promptly give us the best chance of limiting loss.
+
+13. Fees and limits
+Fees, if any, are shown before you confirm a transaction. Current fees: none for deposits, withdrawals, or transfers between Gelly Bank accounts.
+Transaction limits apply: transfers of up to ₱50,000 each and ₱100,000 per day, and cash withdrawals of up to ₱50,000 per day. We may apply lower limits for security or compliance reasons.
+₱100 minimum balance is required to open or keep a Savings or Checking account.
+Interest on Savings accounts. Savings accounts earn interest at 3% per year. Interest is calculated each day on your ending balance, credited to your account once a month, and shown in your transaction history. Interest is reduced by taxes the law requires us to withhold (currently a 20% final withholding tax on peso deposit interest), so the amount credited is net of tax. Checking accounts do not earn interest. We may change the rate by giving you notice under Section 17.
+
+14. Suspension and closure
+We may restrict, suspend or close an account, or deactivate access, if we reasonably suspect fraud or unlawful activity, if you break these Terms, if information you gave is false, or if the law requires it. Where the law allows, we will tell you why. You may ask to close your account at any time once your balance is withdrawn and no transaction is pending. Closing an account does not erase records we must keep by law (see Part B, Section 6).
+
+15. Our responsibility
+We will operate Gelly Bank with reasonable care and protect your account and funds as required by law. We are not responsible for losses caused by your sharing of credentials, by your entering a wrong recipient account number, by events outside our control (such as power or network failure), or by your reliance on AI Insights as financial advice. Nothing in these Terms removes rights that the law gives you as a consumer of financial services.
+
+16. Governing law
+These Terms are governed by the laws of the Republic of the Philippines. Disputes are first raised with us under Section 12. If unresolved, they may be brought to the appropriate regulator or the proper courts of Nagcarlan, Laguna.
+
+17. Changes to these Terms
+We may update these Terms. We will notify you through the dashboard and notifications before material changes take effect. Continuing to use your account after the effective date means you accept the updated Terms. If you do not accept, you may close your account.
+
+18. Contact
+Gelly Bank, 123 Sample Street, Nagcarlan, Laguna 4002, Philippines. Email: support@gellybank.com. Phone: (02) 8000 0000. Teller service hours: Monday to Friday, 9:00 AM to 4:00 PM. Online banking is available 24 hours a day.
+
+Part B: Data Privacy Notice
+
+1. Who we are and the law that applies
+Gelly Bank is the personal information controller for the data described here. We handle your personal data under the Data Privacy Act of 2012 (Republic Act No. 10173), its Implementing Rules and Regulations, and the issuances of the National Privacy Commission (NPC). Because we are a bank, we also follow banking confidentiality, anti-money-laundering and financial consumer protection rules that apply to us.
+
+2. Personal data we collect
+Category — Examples — Where it comes from
+Identity — Full name, date of birth, sex, nationality — You, at registration
+Contact — Email address, mobile number, home address — You, at registration or profile updates
+Verification — Type and number of a government-issued ID, verification status — You, and our staff who review your application
+Account — Account numbers, account type, status, balances, application history and rejection reasons — Generated by the system and our Admins
+Transaction — Deposits, withdrawals, transfers, amounts, dates, reference numbers, statuses, notes, the Teller who processed them — You, the system and our Tellers
+Security — Hashed password, PIN, login and sign-out times, security-setting changes — You and the system
+Technical — Device and browser type, IP address, activity logs — Your device, automatically
+Notifications — Alerts sent to you and their read status — The system
+
+Government-issued ID numbers are sensitive personal information under the Data Privacy Act, so we limit access to them and protect them more strictly. We do not collect more than we need to run your account.
+
+3. Why we use your data
+Purpose — Data used — Basis
+Review your application and open your account — Identity, contact, verification — Your consent, and steps taken at your request before a contract
+Process deposits, withdrawals and transfers, and keep balances accurate — Account, transaction — Performance of our contract with you
+Confirm who you are and prevent fraud — Identity, verification, security, technical — Legal obligation and our legitimate interest in protecting the bank and you
+Meet anti-money-laundering, tax and regulatory duties — Identity, account, transaction — Legal obligation
+Send confirmations, decisions, application updates and security alerts — Contact, notifications, transaction — Performance of our contract and our legitimate interest
+Show spending insights and savings suggestions (AI Insights) — Transaction, account — Your consent, which you may withdraw (see Section 4)
+Staff oversight: assigning Tellers, monitoring transactions and producing summary reports — Transaction, account, staff activity logs — Our legitimate interest in sound operations and legal obligation
+
+4. AI Insights and your data
+AI Insights analyses your own transaction records inside Gelly Bank's systems. Your data is not sent to outside AI providers, and it is not used to build insights for other customers. The analysis produces spending categories, monthly summaries, trends, alerts and suggestions that appear only in your dashboard. Suggestions are labelled as AI-generated and kept apart from verified balances and records. It is a feature you choose: you may turn it off in your settings, and you may withdraw your consent at any time. Your banking services continue to work without it.
+
+5. Who we share data with
+We do not sell your personal data and we do not share it for marketing by other companies. We disclose it only to:
+Regulators and authorities, such as the Bangko Sentral ng Pilipinas and the Anti-Money Laundering Council, or to law enforcement and courts, when the law or a valid order requires it.
+Service providers who help us run the system, such as hosting and security services, under written agreements that limit use to our instructions and require them to protect the data. Current providers: a cloud hosting provider and an email and SMS notification provider.
+The recipient of your transfer, who sees only your name and the details needed to complete the transfer.
+Our own staff, strictly by role: Tellers see what is needed to process requests, and Admins see what is needed to approve accounts and monitor operations.
+If we ever need to share your data in another way, we will ask for your consent first.
+
+6. How long we keep data
+Data — Kept for
+Account and transaction records — At least five years from the transaction date or from account closure, as required by anti-money-laundering law, then securely deleted or anonymised
+Identity and verification records — Same period as the account records
+Rejected or withdrawn applications — One year after the decision, then deleted
+Security and activity logs — One year
+AI Insights results — Until you turn the feature off or close your account
+
+Records we must keep by law are kept even if you ask us to delete them, and are used only for that legal purpose.
+
+7. How we protect your data
+Passwords and PINs are stored only in hashed form, never as readable text.
+Data is encrypted while travelling between your device and our servers.
+Access is role-based: Customers, Tellers and Admins can reach only what their role needs.
+Money movements are processed as all-or-nothing operations, and transactions are recorded so they can be traced to the Teller or customer action behind them.
+Staff accounts can be deactivated immediately.
+If a breach puts your data at real risk of serious harm, we will notify the National Privacy Commission and the people affected within 72 hours of knowing about it, as the NPC requires.
+No system is perfectly secure. Your own care with passwords and devices (Part A, Section 9) is part of keeping your data safe.
+
+8. Your rights
+The Data Privacy Act gives you these rights over your personal data:
+Be informed — Know what we collect, why, and who gets it, as set out here
+Access — Ask for a copy of the personal data we hold about you
+Correct — Ask us to fix data that is wrong or out of date. Some details can be edited in your Profile
+Object — Refuse processing that is based on consent, and withdraw consent, including for AI Insights
+Erase or block — Ask us to remove or stop using data that is unlawfully held or no longer needed, except records we must keep by law
+Data portability — Ask for your data in a commonly used electronic format where this applies
+Compensation — Claim damages if inaccurate, unlawfully obtained or unauthorised use of your data harms you
+Complain — Lodge a complaint with the National Privacy Commission
+
+To use any right, contact our Data Protection Officer below. We may need to confirm your identity first, and we will answer within a reasonable time and explain any refusal.
+
+9. Contact and complaints
+Data Protection Officer: Alyanna Faye Villanueva, Gelly Bank, 123 Sample Street, Nagcarlan, Laguna 4002, Philippines. Email: dpo@gellybank.com. Phone: (02) 8000 0001.
+If we do not resolve your concern, you may complain to the National Privacy Commission at privacy.gov.ph.

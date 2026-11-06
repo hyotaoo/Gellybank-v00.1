@@ -1,6 +1,6 @@
 import type { SVGProps } from 'react';
 
-const CopyIcon = (props: SVGProps<SVGSVGElement>) => (
+const InfoIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="24"
     height="24"
@@ -13,9 +13,10 @@ const CopyIcon = (props: SVGProps<SVGSVGElement>) => (
     xmlns="http://www.w3.org/2000/svg"
     {...props}
   >
-    <rect width="14" height="14" x="8" y="8" rx="2.5" />
-    <path d="M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2" />
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5" />
+    <path d="M12 8h.01" />
   </svg>
 );
 
-export default CopyIcon;
+export default InfoIcon;

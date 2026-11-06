@@ -41,21 +41,15 @@ If the dashboard cannot load for some reason, there is a plain text menu:
 python dev.py --plain
 ```
 
-## Demo account
+## First run
 
-On first start, if the database is empty, a demo customer is seeded:
-
-```
-demo@gellybank.com  /  demo12345
-```
-
-It comes with a savings account (₱25,000) and a checking account (₱8,500).
+The database starts empty. Use the sign-up page to create a customer account,
+then sign in with those credentials.
 
 ## Layout
 
 ```
 dev.py           Cross-platform setup and run tool
-requirements-tui.txt
 backend/         Flask API, SQLAlchemy models, MySQL schema
 frontend/        React app
 ROADMAP.md       What works, what doesn't, and what comes next

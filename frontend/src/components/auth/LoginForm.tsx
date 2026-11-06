@@ -11,8 +11,6 @@ interface LoginLocationState {
   email?: string;
 }
 
-const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
-
 // Figma 45:105 — 513x445, r36, blush 90%, 1px primary, pad 35/54
 const LoginForm = () => {
   const navigate = useNavigate();
@@ -30,18 +28,6 @@ const LoginForm = () => {
     setError(undefined);
 
     try {
-      if (DEMO_MODE) {
-        setAuthUser({
-          id: 'demo',
-          firstName: 'Jhamel',
-          lastName: 'Sumague',
-          email: 'demo@gellybank.com',
-          role: 'customer',
-        });
-        navigate('/dashboard');
-        return;
-      }
-
       const response = await login({ email, password });
       if (response.user.role !== 'customer') {
         setAuthToken(null);

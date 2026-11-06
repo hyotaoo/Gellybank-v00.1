@@ -2,12 +2,12 @@
 
 import os
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, abort, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -26,9 +26,6 @@ if not DATABASE_URL:
     )
 
 TOKEN_MAX_AGE = 60 * 60 * 24  
-
-DEMO_EMAIL = "demo@gellybank.com"
-DEMO_PASSWORD = "demo12345"
 
 
 app = Flask(__name__)
@@ -96,6 +93,11 @@ def error(message, status=400, code=None):
     return jsonify(payload), status
 
 
+@app.errorhandler(401)
+def handle_unauthorized(_error):
+    return error("Authentication required.", 401, "unauthorized")
+
+
 
 def hash_password(password):
     return generate_password_hash(password)
@@ -121,7 +123,7 @@ def current_user():
                 return user
         except (BadSignature, SignatureExpired):
             pass  
-    return AppUser.query.filter_by(username=DEMO_EMAIL).first()
+    abort(401)
 
 
 
@@ -1235,153 +1237,6 @@ def health():
     return {"status": "success", "message": "Gellybank backend API is live!"}
 
 
-
-def add_demo_data():
-    if Customer.query.first():
-        return  
-
-    savings_type = AccountType.query.filter_by(type_name="SAVINGS").first()
-    checking_type = AccountType.query.filter_by(type_name="CHECKING").first()
-    if not savings_type or not checking_type:
-        return  
-
-    customer = Customer(
-        first_name="Jhamel",
-        last_name="Sumague",
-        email=DEMO_EMAIL,
-        phone="+639171234567",
-        address="Manila, Philippines",
-    )
-    db.session.add(customer)
-    db.session.flush()  
-
-    user = AppUser(
-        customer_id=customer.customer_id,
-        username=DEMO_EMAIL,  
-        password_hash=hash_password(DEMO_PASSWORD),
-        role="CUSTOMER",
-    )
-    db.session.add(user)
-    db.session.flush()
-
-    savings = BankAccount(
-        customer_id=customer.customer_id,
-        account_type_id=savings_type.account_type_id,
-        account_number=new_account_number(),
-        current_balance=25000.00,
-        interest_rate=savings_type.default_interest_rate,
-    )
-    checking = BankAccount(
-        customer_id=customer.customer_id,
-        account_type_id=checking_type.account_type_id,
-        account_number=new_account_number(),
-        current_balance=8500.00,
-        interest_rate=checking_type.default_interest_rate,
-    )
-    db.session.add_all([savings, checking])
-    db.session.flush()
-
-    db.session.add_all([
-        Transaction(
-            account_id=savings.account_id,
-            transaction_type="DEPOSIT",
-            amount=25000.00,
-            balance_after=25000.00,
-            reference_code=new_reference(),
-            description="Initial deposit",
-            performed_by_user_id=user.user_id,
-            created_at=utcnow(),
-        ),
-        Transaction(
-            account_id=checking.account_id,
-            transaction_type="DEPOSIT",
-            amount=8500.00,
-            balance_after=8500.00,
-            reference_code=new_reference(),
-            description="Payroll",
-            performed_by_user_id=user.user_id,
-            created_at=utcnow(),
-        ),
-    ])
-
-    db.session.add(Beneficiary(
-        customer_id=customer.customer_id,
-        name="Maria Santos",
-        account_number="100020003099",
-        bank="GellyBank",
-    ))
-
-    db.session.commit()
-
-
-def ensure_demo_notifications():
-    user = AppUser.query.filter_by(username=DEMO_EMAIL).first()
-    if not user or Notification.query.filter_by(user_id=user.user_id).first():
-        return
-
-    now = utcnow()
-    db.session.add_all([
-        Notification(
-            user_id=user.user_id,
-            title="Deposit received",
-            message="PHP 10,000.00 was credited to your checking account.",
-            kind="transaction",
-            href="/dashboard/history",
-            created_at=now - timedelta(hours=2),
-        ),
-        Notification(
-            user_id=user.user_id,
-            title="Transfer sent",
-            message="PHP 1,500.00 was sent from your checking account to Maria Santos.",
-            kind="transaction",
-            href="/dashboard/history",
-            created_at=now - timedelta(hours=5),
-        ),
-        Notification(
-            user_id=user.user_id,
-            title="AI insights ready",
-            message="Your latest spending summary is ready to review.",
-            kind="insight",
-            href="/dashboard/insights",
-            created_at=now - timedelta(days=1),
-        ),
-        Notification(
-            user_id=user.user_id,
-            title="Withdrawal completed",
-            message="PHP 2,000.00 was debited from your checking account.",
-            kind="transaction",
-            href="/dashboard/history",
-            is_read=True,
-            read_at=now - timedelta(days=1, hours=12),
-            created_at=now - timedelta(days=2),
-        ),
-        Notification(
-            user_id=user.user_id,
-            title="New login detected",
-            message="A new login to your GellyBank account was detected.",
-            kind="security",
-            href="/dashboard/profile",
-            is_read=True,
-            read_at=now - timedelta(days=3, hours=12),
-            created_at=now - timedelta(days=4),
-        ),
-        Notification(
-            user_id=user.user_id,
-            title="Account statement ready",
-            message="Your monthly account statement is ready to download.",
-            kind="account",
-            href="/dashboard/accounts",
-            is_read=True,
-            read_at=now - timedelta(days=6, hours=12),
-            created_at=now - timedelta(days=7),
-        ),
-    ])
-    db.session.commit()
-
-
-with app.app_context():
-    add_demo_data()  
-    ensure_demo_notifications()
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

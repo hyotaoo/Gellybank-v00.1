@@ -1,7 +1,7 @@
 # Gellybank backend (Flask + MySQL)
 
 The whole server is one file: **`app.py`**. Read it top to bottom:
-settings → helpers → tables → endpoints → demo data → start.
+settings → helpers → tables → endpoints → start.
 
 ## Setup
 
@@ -13,7 +13,6 @@ creating the database, filling in `.env`, and starting the server.
 | File | What it is |
 | --- | --- |
 | `app.py` | The Flask app, the SQLAlchemy models, and every route |
-| `app_detailed.py` | The same code with heavy explanatory comments |
 | `db/schema.sql` | The MySQL schema: 9 tables, 2 views, and the two account types |
 | `.env` | Your MySQL credentials and secret key. `python dev.py` writes it. Git ignores it |
 | `requirements.txt` | The Python packages the app needs |
@@ -38,6 +37,5 @@ Two things worth knowing before you read the code:
 
 - The full list of endpoints, and which ones the frontend actually calls, is
   in the [root ROADMAP](../ROADMAP.md), section 5.
-- The demo customer (`demo@gellybank.com` / `demo12345`), the way requests
-  without a valid token fall back to that customer, and the missing
-  primary-account column are all in the ROADMAP too, sections 7 and 9.
+- All `/api` routes except health and auth require a valid bearer token. There
+  is no seeded customer: create one through the sign-up page, then log in.
