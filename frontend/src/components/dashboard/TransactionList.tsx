@@ -85,13 +85,13 @@ const TransactionList = ({ accountId, currency, limit, className = '' }: Transac
   if (transactions.length === 0) {
     return (
       <div className={`flex flex-1 flex-col items-center justify-center gap-4 ${className}`}>
-        <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-white text-primary">
-          <HistoryIcon className="h-8 w-8" />
+        <span className="flex h-[99px] w-[99px] items-center justify-center rounded-full border border-ink bg-white text-primary">
+          <HistoryIcon className="h-11 w-11" />
         </span>
         <div className="flex flex-col items-center gap-2 text-center">
-          <p className="text-[22px] font-semibold leading-[1.21] text-ink">No transactions yet</p>
-          <p className="max-w-[425px] text-[13px] leading-[1.21] text-muted">
-            Your recent deposits, withdrawals, and transfers will appear here.
+          <p className="text-[20px] font-semibold leading-[24px] text-ink">No transactions yet</p>
+          <p className="max-w-[433px] text-[14px] font-normal leading-[17px] text-muted">
+            Recent deposits, withdrawals, and transfers will appear here.
           </p>
         </div>
       </div>
@@ -114,7 +114,7 @@ const TransactionList = ({ accountId, currency, limit, className = '' }: Transac
               type="button"
               onClick={() => setReceipt(transaction)}
               title="View receipt"
-              className="flex w-full items-center gap-4 rounded-[20px] bg-white p-4 text-left transition-colors hover:bg-surface-card focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover"
+              className="flex w-full items-center gap-4 rounded-[20px] border border-surface-line bg-white p-4 text-left transition-colors hover:bg-surface-card focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover"
             >
               <span className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-surface-card text-primary">
                 {typeIcon[transaction.type]}

@@ -43,7 +43,7 @@ const AccountsPage = () => {
 
   return (
     <DashboardLayout title="Accounts">
-      <div className="flex flex-1 flex-col gap-6 pb-2 lg:overflow-y-auto lg:pr-1">
+      <div className="flex flex-1 flex-col gap-6 overflow-y-auto pb-6 pl-[14px] pr-[18px]">
         <OpenAccountForm />
 
         {message && (
@@ -57,7 +57,7 @@ const AccountsPage = () => {
         ) : error ? (
           <p className="text-[14px] text-red-600">{error}</p>
         ) : (
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          <div className="grid grid-cols-2 gap-5">
             {accounts.map((account) => (
               <AccountCard
                 key={account.id}

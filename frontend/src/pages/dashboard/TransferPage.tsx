@@ -1,37 +1,57 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError } from '@/api/client';
 import { createTransfer } from '@/api/transactions';
 import type { Transaction } from '@/api/transactions';
-import { listBeneficiaries } from '@/api/beneficiaries';
+import { createBeneficiary, listBeneficiaries } from '@/api/beneficiaries';
 import type { Beneficiary } from '@/api/beneficiaries';
-import AccountSelect from '@/components/dashboard/AccountSelect';
-import AmountField from '@/components/dashboard/AmountField';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import ReceiptModal from '@/components/dashboard/ReceiptModal';
-import Select from '@/components/common/Select';
-import Input from '@/components/common/Input';
-import Button from '@/components/common/Button';
+import BankIcon from '@/components/icons/BankIcon';
+import CircleCheckIcon from '@/components/icons/CircleCheckIcon';
+import { SourceAccountCard } from '@/components/cash/AccountCards';
+import { OutlinedAmountBox } from '@/components/cash/AmountBox';
+import {
+  CashWorkspace,
+  DetailsCard,
+  Divider,
+  ReviewHeading,
+  ReviewPanel,
+  ReviewRow,
+  ReviewSummary,
+  ReviewTotal,
+  SecurityNote,
+  SubmitButton,
+  initialsFor,
+} from '@/components/cash/CashShell';
 import { useAccounts } from '@/context/AccountContext';
-import { formatCurrency, maskAccountNumber } from '@/utils/format';
+import { formatAccountNumber, formatCurrency } from '@/utils/format';
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 type Mode = 'internal' | 'external';
+
+interface ResolvedRecipient {
+  name: string;
+  accountNumber: string;
+  bank: string;
+  destinationAccountId?: string;
+  beneficiaryId?: string;
+}
+
+const digitsOnly = (value: string): string => value.replace(/\D/g, '');
 
 const TransferPage = () => {
   const { accounts, selectedAccount, refresh } = useAccounts();
   const [sourceId, setSourceId] = useState('');
   const [mode, setMode] = useState<Mode>('internal');
-  const [destinationId, setDestinationId] = useState('');
-  const [beneficiaryId, setBeneficiaryId] = useState('');
-  const [destinationAccountNumber, setDestinationAccountNumber] = useState('');
-  const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
+  const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [saveRecipient, setSaveRecipient] = useState(false);
+  const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string>();
   const [receipt, setReceipt] = useState<Transaction | null>(null);
-  const controllerRef = useRef<AbortController>();
 
   useEffect(() => {
     if (!sourceId && selectedAccount) setSourceId(selectedAccount.id);
@@ -39,7 +59,6 @@ const TransferPage = () => {
 
   useEffect(() => {
     const controller = new AbortController();
-    controllerRef.current = controller;
     listBeneficiaries(controller.signal)
       .then((data) => {
         if (!controller.signal.aborted) setBeneficiaries(data);
@@ -51,18 +70,56 @@ const TransferPage = () => {
   }, []);
 
   const sourceAccount = accounts.find((item) => item.id === sourceId);
-  const destinationAccount = accounts.find((item) => item.id === destinationId);
-  const beneficiary = beneficiaries.find((item) => item.id === beneficiaryId);
-  const parsedAmount = Number(amount);
+  const parsedAmount = Number.parseFloat(amount) || 0;
+  const balance = sourceAccount?.balance ?? 0;
+
+  const resolved = useMemo<ResolvedRecipient | null>(() => {
+    const typed = digitsOnly(recipient);
+    if (typed.length < 4) return null;
+
+    const accountMatch = accounts.find(
+      (account) => account.id !== sourceId && digitsOnly(account.accountNumber) === typed,
+    );
+    const beneficiaryMatch = beneficiaries.find(
+      (beneficiary) => digitsOnly(beneficiary.accountNumber) === typed,
+    );
+
+    const fromAccount: ResolvedRecipient | null = accountMatch
+      ? {
+          name: `GellyBank ${accountMatch.label}`,
+          accountNumber: accountMatch.accountNumber,
+          bank: 'GellyBank',
+          destinationAccountId: accountMatch.id,
+        }
+      : null;
+    const fromBeneficiary: ResolvedRecipient | null = beneficiaryMatch
+      ? {
+          name: beneficiaryMatch.name,
+          accountNumber: beneficiaryMatch.accountNumber,
+          bank: beneficiaryMatch.bank ?? 'GellyBank',
+          beneficiaryId: beneficiaryMatch.id,
+        }
+      : null;
+
+    if (mode === 'internal') return fromAccount ?? fromBeneficiary;
+
+    return (
+      fromBeneficiary ??
+      fromAccount ?? {
+        name: 'GellyBank recipient',
+        accountNumber: typed,
+        bank: 'GellyBank',
+      }
+    );
+  }, [accounts, beneficiaries, mode, recipient, sourceId]);
 
   const amountError = (() => {
-    if (!amount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-      return amount ? 'Enter an amount greater than zero.' : undefined;
-    }
-    if (sourceAccount && sourceAccount.type === 'savings' && parsedAmount > sourceAccount.balance) {
+    if (!amount) return undefined;
+    if (Number.isNaN(parsedAmount) || parsedAmount < 1) return 'Minimum transfer is ₱1.00';
+    if (sourceAccount?.type === 'savings' && parsedAmount > balance) {
       return 'Insufficient funds. Savings accounts cannot be overdrawn.';
     }
-    if (sourceAccount && parsedAmount > sourceAccount.balance + (sourceAccount.overdraftLimit ?? 0)) {
+    if (sourceAccount && parsedAmount > balance + (sourceAccount.overdraftLimit ?? 0)) {
       return 'Amount exceeds your available balance.';
     }
     return undefined;
@@ -70,210 +127,305 @@ const TransferPage = () => {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (status === 'loading') return;
 
-    if (!sourceId || !amount || amountError) {
+    if (!sourceAccount) {
       setStatus('error');
-      setMessage(amountError ?? 'Choose a source account and enter a valid amount.');
+      setMessage('Choose an account to transfer from.');
       return;
     }
-    if (mode === 'internal' && (!destinationId || destinationId === sourceId)) {
+    if (!amount || amountError) {
       setStatus('error');
-      setMessage('Choose a different destination account.');
+      setMessage(amountError ?? 'Enter an amount to send.');
       return;
     }
-    if (mode === 'external' && !beneficiaryId && !destinationAccountNumber) {
+    if (!resolved) {
       setStatus('error');
-      setMessage('Choose a recipient or enter an account number.');
+      setMessage('Enter a valid account number to verify the recipient.');
       return;
     }
 
     setStatus('loading');
     setMessage(undefined);
     try {
-      const transaction = await createTransfer({
-        sourceAccountId: sourceId,
+      const transfer = await createTransfer({
+        sourceAccountId: sourceAccount.id,
         amount: parsedAmount,
         note: note.trim() || undefined,
-        destinationAccountId: mode === 'internal' ? destinationId : undefined,
+        destinationAccountId: resolved.destinationAccountId,
         destinationAccountNumber:
-          mode === 'external' && destinationAccountNumber ? destinationAccountNumber : undefined,
-        beneficiaryId:
-          mode === 'external' && !destinationAccountNumber ? beneficiaryId : undefined,
+          resolved.destinationAccountId || resolved.beneficiaryId
+            ? undefined
+            : resolved.accountNumber,
+        beneficiaryId: resolved.beneficiaryId,
       });
+
+      if (saveRecipient && !resolved.beneficiaryId) {
+        try {
+          const saved = await createBeneficiary({
+            name: resolved.name,
+            accountNumber: resolved.accountNumber,
+            bank: resolved.bank,
+          });
+          setBeneficiaries((current) =>
+            current.some((beneficiary) => beneficiary.id === saved.id)
+              ? current
+              : [...current, saved],
+          );
+        } catch {
+          // The transfer already completed; saving the recipient is best-effort.
+        }
+      }
+
       await refresh();
+      setReceipt(transfer);
       setStatus('success');
-      setMessage(`${formatCurrency(parsedAmount, sourceAccount?.currency)} transferred successfully.`);
-      setReceipt(transaction);
-      setAmount('');
-      setNote('');
-      setDestinationId('');
-      setBeneficiaryId('');
-      setDestinationAccountNumber('');
+      setMessage(`${formatCurrency(parsedAmount, sourceAccount.currency)} sent successfully.`);
     } catch (err) {
       setStatus('error');
       setMessage(err instanceof ApiError ? err.message : 'Transfer failed. Please try again.');
     }
   };
 
-  const destinationLabel = (() => {
-    if (mode === 'internal') return destinationAccount?.label ?? '—';
-    if (beneficiary) return beneficiary.name;
-    return destinationAccountNumber ? maskAccountNumber(destinationAccountNumber) : '—';
-  })();
+  const recipientName = resolved?.name ?? 'No recipient yet';
+  const bankLine = resolved
+    ? `${resolved.bank} • ${formatAccountNumber(resolved.accountNumber)}`
+    : 'Enter an account number to verify';
 
   return (
     <DashboardLayout title="Transfer">
-      <div className="flex flex-1 flex-col gap-6 pb-2 lg:flex-row lg:overflow-hidden">
-        <form
-          onSubmit={handleSubmit}
-          className="flex flex-1 flex-col gap-5 rounded-[28px] border border-surface-line bg-surface-soft p-5 sm:p-8 lg:overflow-y-auto"
-        >
-          <AccountSelect
-            label="From account"
-            accounts={accounts}
-            value={sourceId}
-            onChange={setSourceId}
-            helper="The account funds will be taken from."
-          />
-
-          <div className="flex flex-col gap-2">
-            <span className="text-[14px] font-medium leading-[1.21] text-ink">Send to</span>
-            <div role="tablist" aria-label="Transfer destination" className="flex gap-3">
-              {(['internal', 'external'] as Mode[]).map((value) => {
-                const active = value === mode;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setMode(value)}
-                    className={`h-11 flex-1 rounded-full border text-[14px] font-semibold transition-colors ${
-                      active
-                        ? 'border-primary bg-surface-card text-ink'
-                        : 'border-surface-line bg-white text-muted hover:border-primary/60'
-                    }`}
-                  >
-                    {value === 'internal' ? 'My accounts' : 'Others'}
-                  </button>
-                );
-              })}
+      <form onSubmit={handleSubmit} className="w-full">
+        <CashWorkspace>
+          <DetailsCard gap="gap-4" padding="p-8">
+            <div className="flex flex-none flex-col gap-2">
+              <h2 className="text-[36px] font-semibold leading-[43px] text-ink">Send money</h2>
             </div>
-          </div>
 
-          {mode === 'internal' ? (
-            <AccountSelect
-              label="Destination account"
-              accounts={accounts}
-              value={destinationId}
-              onChange={setDestinationId}
-              excludeId={sourceId}
-              placeholder="Choose one of your accounts"
-            />
-          ) : (
-            <div className="flex flex-col gap-4 rounded-[20px] border border-surface-line bg-white p-4">
-              <label className="flex flex-col gap-2">
-                <span className="text-[14px] font-medium leading-[1.21] text-ink">Saved recipient</span>
-                <Select
-                  value={beneficiaryId}
-                  onChange={(event) => {
-                    setBeneficiaryId(event.target.value);
-                    if (event.target.value) setDestinationAccountNumber('');
-                  }}
-                >
-                  <option value="">Select a recipient</option>
-                  {beneficiaries.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} · {maskAccountNumber(item.accountNumber)}
-                    </option>
-                  ))}
-                </Select>
-                {beneficiaries.length === 0 && (
-                  <span className="text-[12px] leading-[1.21] text-muted">
-                    No saved recipients yet.
-                  </span>
-                )}
-              </label>
+            <SourceAccountCard accounts={accounts} value={sourceId} onChange={setSourceId} />
 
-              <div className="flex items-center gap-3 text-[12px] leading-[1.21] text-muted">
-                <span className="h-px flex-1 bg-surface-line" />
-                or
-                <span className="h-px flex-1 bg-surface-line" />
+            <div className="flex flex-none flex-col gap-3">
+              <p className="text-[18px] font-semibold leading-[22px] text-ink">Recipient</p>
+
+              <div
+                role="tablist"
+                aria-label="Transfer destination"
+                className="flex h-12 w-full items-center gap-1 rounded-[16px] bg-surface-card p-1"
+              >
+                {(
+                  [
+                    { value: 'internal', label: 'GellyBank account' },
+                    { value: 'external', label: 'Other banks' },
+                  ] as { value: Mode; label: string }[]
+                ).map((tab) => {
+                  const active = tab.value === mode;
+                  return (
+                    <button
+                      key={tab.value}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => {
+                        setMode(tab.value);
+                        setStatus('idle');
+                        setMessage(undefined);
+                      }}
+                      className={`flex h-10 flex-1 items-center justify-center gap-2 rounded-[12px] text-[16px] font-semibold leading-[19px] transition-colors ${
+                        active ? 'bg-white text-primary' : 'text-[#6E6168] hover:text-ink'
+                      }`}
+                    >
+                      {active ? <BankIcon className="h-[18px] w-[18px]" /> : null}
+                      {tab.label}
+                    </button>
+                  );
+                })}
               </div>
 
-              <label className="flex flex-col gap-2">
-                <span className="text-[14px] font-medium leading-[1.21] text-ink">Gellybank account number</span>
-                <Input
-                  value={destinationAccountNumber}
-                  inputMode="numeric"
-                  placeholder="e.g. 100020003099"
+              {mode === 'external' && beneficiaries.length > 0 && (
+                <div className="flex flex-none flex-col gap-2">
+                  <label
+                    htmlFor="transfer-saved-recipient"
+                    className="text-[16px] font-semibold leading-[19px] text-ink"
+                  >
+                    Saved recipient
+                  </label>
+                  <select
+                    id="transfer-saved-recipient"
+                    value=""
+                    onChange={(event) => {
+                      const next = beneficiaries.find(
+                        (beneficiary) => beneficiary.accountNumber === event.target.value,
+                      );
+                      if (!next) return;
+                      setRecipient(next.accountNumber);
+                      setStatus('idle');
+                      setMessage(undefined);
+                    }}
+                    className="h-[52px] w-full rounded-[16px] border border-[#E8E0D8] bg-white px-4 text-[18px] font-normal leading-[22px] text-ink outline-none focus:border-primary"
+                  >
+                    <option value="">Select a saved recipient</option>
+                    {beneficiaries.map((beneficiary) => (
+                      <option key={beneficiary.id} value={beneficiary.accountNumber}>
+                        {beneficiary.name} · {formatAccountNumber(beneficiary.accountNumber)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="flex flex-none flex-col gap-2">
+                <label
+                  htmlFor="transfer-account-number"
+                  className="text-[16px] font-semibold leading-[19px] text-ink"
+                >
+                  Account number
+                </label>
+                <input
+                  id="transfer-account-number"
+                  value={recipient}
                   onChange={(event) => {
-                    const value = event.target.value.replace(/\D/g, '');
-                    setDestinationAccountNumber(value);
-                    if (value) setBeneficiaryId('');
+                    setRecipient(event.target.value.replace(/[^\d\s]/g, ''));
+                    if (status === 'error') {
+                      setStatus('idle');
+                      setMessage(undefined);
+                    }
                   }}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className="h-[52px] w-full rounded-[16px] border border-[#E8E0D8] bg-white px-4 text-[18px] font-normal leading-[22px] text-ink outline-none placeholder:text-muted focus:border-primary"
                 />
-                <span className="text-[12px] leading-[1.21] text-muted">
-                  Send to another Gellybank customer by entering their account number.
-                </span>
-              </label>
+              </div>
+
+              <div className="flex min-h-[18px] items-center gap-2">
+                {resolved ? (
+                  <>
+                    <CircleCheckIcon className="h-[18px] w-[18px] flex-none text-[#43814C]" />
+                    <span className="text-[14px] font-semibold leading-[17px] text-[#43814C]">
+                      {resolved.name}
+                    </span>
+                    <span className="text-[14px] font-normal leading-[17px] text-muted">
+                      {resolved.destinationAccountId || resolved.beneficiaryId
+                        ? 'Account verified'
+                        : 'Account number entered'}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[14px] font-normal leading-[17px] text-muted">
+                    Enter the recipient&apos;s account number to verify.
+                  </span>
+                )}
+              </div>
             </div>
-          )}
 
-          <AmountField value={amount} onChange={setAmount} error={amountError} helper="Amount to send." />
-          <label className="flex flex-col gap-2">
-            <span className="text-[14px] font-medium leading-[1.21] text-ink">Note (optional)</span>
-            <Input value={note} onChange={(event) => setNote(event.target.value)} placeholder="e.g. Shared bill" />
-          </label>
+            <Divider />
 
-          <div className="mt-2 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-4">
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={status === 'loading'}
-              className="h-[52px] px-8 text-[16px] font-semibold"
-            >
-              {status === 'loading' ? 'Processing…' : 'Review transfer'}
-            </Button>
-            {message && (
-              <span
-                role="status"
-                className={`text-[13px] leading-[1.21] ${status === 'error' ? 'text-red-600' : 'text-emerald-600'}`}
+            <div className="flex flex-none flex-col gap-2">
+              <label
+                htmlFor="transfer-amount"
+                className="text-[16px] font-semibold leading-[19px] text-ink"
               >
-                {message}
-              </span>
-            )}
-          </div>
-        </form>
+                Amount
+              </label>
+              <OutlinedAmountBox
+                id="transfer-amount"
+                value={amount}
+                onChange={(next) => {
+                  setAmount(next);
+                  if (status === 'error') {
+                    setStatus('idle');
+                    setMessage(undefined);
+                  }
+                }}
+              />
+              <div className="flex items-center justify-between text-[14px] leading-[17px]">
+                <span className="text-muted">Minimum transfer: ₱1.00</span>
+                <span className={amountError ? 'text-red-600' : 'font-semibold text-primary'}>
+                  {amountError ?? 'No transfer fee'}
+                </span>
+              </div>
+            </div>
 
-        <aside className="flex w-full flex-none flex-col gap-5 rounded-[28px] bg-[rgba(248,231,185,0.32)] p-5 sm:p-8 lg:w-[350px]">
-          <h2 className="text-[18px] font-semibold leading-[1.21] text-ink">Transfer summary</h2>
-          <dl className="flex flex-col gap-3 text-[14px] leading-[1.21]">
-            <div className="flex items-center justify-between">
-              <dt className="text-muted">From</dt>
-              <dd className="font-medium text-ink">{sourceAccount?.label ?? '—'}</dd>
+            <div className="flex flex-none flex-col gap-2">
+              <label
+                htmlFor="transfer-note"
+                className="text-[16px] font-semibold leading-[19px] text-ink"
+              >
+                Note (optional)
+              </label>
+              <input
+                id="transfer-note"
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                className="h-[52px] w-full rounded-[16px] border border-[#E8E0D8] bg-white px-4 text-[18px] font-normal leading-[22px] text-ink outline-none placeholder:text-muted focus:border-primary"
+              />
             </div>
-            <div className="flex items-center justify-between">
-              <dt className="text-muted">To</dt>
-              <dd className="font-medium text-ink">{destinationLabel}</dd>
+
+            <label className="flex w-fit cursor-pointer items-center gap-2.5">
+              <input
+                type="checkbox"
+                checked={saveRecipient}
+                onChange={(event) => setSaveRecipient(event.target.checked)}
+                className="h-5 w-5 flex-none rounded-[6px] border border-[#E8E0D8] accent-primary"
+              />
+              <span className="text-[15px] font-normal leading-[18px] text-[#6E6168]">
+                Save this recipient for next time
+              </span>
+            </label>
+          </DetailsCard>
+
+          <ReviewPanel>
+            <ReviewHeading
+              title="Review"
+              description="Make sure everything looks right before sending."
+            />
+
+            <ReviewSummary
+              initials={initialsFor(resolved?.name)}
+              name={recipientName}
+              detail={bankLine}
+            />
+
+            <Divider />
+
+            <div className="flex flex-none flex-col gap-5">
+              <ReviewRow label="Amount" value={formatCurrency(parsedAmount, sourceAccount?.currency)} />
+              <ReviewRow label="Transfer fee" value="₱0.00" />
+              <ReviewRow label="When" value="Send now" />
+              <ReviewRow label="Arrival" value="Instant" />
             </div>
-            <div className="flex items-center justify-between">
-              <dt className="text-muted">Amount</dt>
-              <dd className="font-medium text-ink">{amount ? formatCurrency(parsedAmount || 0, sourceAccount?.currency) : '—'}</dd>
+
+            <ReviewTotal
+              label="Total to send"
+              amount={formatCurrency(parsedAmount, sourceAccount?.currency)}
+              note={`Balance after transfer: ${formatCurrency(balance - parsedAmount, sourceAccount?.currency)}`}
+            />
+
+            <div className="mt-auto flex flex-none flex-col gap-4">
+              <p className="text-[14px] font-normal leading-[17px] text-[#6E6168]">
+                Please check the account number. Transfers cannot be reversed.
+              </p>
+              <SubmitButton
+                label={`Send ${formatCurrency(parsedAmount, sourceAccount?.currency)}`}
+                disabled={status === 'loading'}
+              />
+              {message ? (
+                <p
+                  className={`text-center text-[13px] font-normal leading-[16px] ${
+                    status === 'success' ? 'text-[#43814C]' : 'text-red-600'
+                  }`}
+                >
+                  {message}
+                </p>
+              ) : (
+                <SecurityNote>Safe and secure with GellyBank</SecurityNote>
+              )}
             </div>
-          </dl>
-          <div className="mt-auto rounded-[20px] bg-white p-4">
-            <p className="text-[13px] text-muted">Available balance</p>
-            <p className="mt-1 text-[24px] font-bold leading-[1.21] text-ink">
-              {sourceAccount ? formatCurrency(sourceAccount.balance, sourceAccount.currency) : '—'}
-            </p>
-          </div>
-        </aside>
-      </div>
+          </ReviewPanel>
+        </CashWorkspace>
+      </form>
       {receipt && (
         <ReceiptModal
           transaction={receipt}
-          account={sourceAccount}
+          account={sourceAccount ?? null}
           onClose={() => setReceipt(null)}
         />
       )}

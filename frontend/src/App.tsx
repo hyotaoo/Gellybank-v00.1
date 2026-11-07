@@ -25,6 +25,7 @@ import TransferPage from './pages/dashboard/TransferPage';
 import HistoryPage from './pages/dashboard/HistoryPage';
 import RequestsPage from './pages/dashboard/RequestsPage';
 import ProfilePage from './pages/dashboard/ProfilePage';
+import PlaceholderPage from './pages/dashboard/PlaceholderPage';
 import { AccountProvider } from './context/AccountContext';
 import { getAuthToken } from './api/client';
 import type { TokenScope } from './api/client';
@@ -44,6 +45,7 @@ function App() {
       <Routes>
         <Route path="/" element={<LoginPage />} />
         <Route path="/login" element={<SignInPage />} />
+        <Route path="/signin" element={<Navigate to="/login" replace />} />
         <Route path="/teller/login" element={<TellerLoginPage />} />
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/signup" element={<SignUpPage />} />
@@ -81,6 +83,15 @@ function App() {
             <Route path="/dashboard/history" element={<HistoryPage />} />
             <Route path="/dashboard/requests" element={<RequestsPage />} />
             <Route path="/dashboard/profile" element={<ProfilePage />} />
+            <Route
+              path="/dashboard/insights"
+              element={
+                <PlaceholderPage
+                  title="AI Insights"
+                  description="Detailed spending analysis for your accounts will appear here."
+                />
+              }
+            />
           </Route>
         </Route>
 

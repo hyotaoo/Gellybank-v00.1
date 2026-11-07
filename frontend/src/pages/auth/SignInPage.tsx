@@ -1,33 +1,26 @@
-import LoginForm from '@/components/auth/LoginForm';
+import BrandPanel from '@/components/auth/BrandPanel';
 import LoginIllustration from '@/components/auth/LoginIllustration';
-import brandDecorationCircle from '@/assets/teller/brand-decoration-circle-large.svg';
+import useFitScale, { DESIGN_HEIGHT, DESIGN_WIDTH } from '@/hooks/useFitScale';
 
-const SignInPage = () => (
-  <main className="min-h-[100dvh] w-full overflow-hidden bg-brand-gradient font-sans text-ink">
-    <div className="relative mx-auto flex min-h-[100dvh] w-full max-w-[1440px] flex-col items-center justify-center gap-10 px-5 py-10 sm:px-10 lg:px-14">
-      <img
-        aria-hidden="true"
-        src={brandDecorationCircle}
-        className="pointer-events-none absolute -right-[69px] -top-[52px]"
-        width="427"
-        height="390"
-        alt=""
-      />
+// Figma 14:39 — 1440x1024, radial cream→blush page fill
+const SignInPage = () => {
+  const scale = useFitScale();
 
-      {/* Heading + form, centered */}
-      <section className="relative z-10 flex w-full max-w-[720px] flex-col items-center gap-12">
-        <h1 className="text-center text-[52px] font-black leading-none text-white sm:text-[64px]">
-          <span className="text-white/60">Welcome</span> Back!
-        </h1>
-        <LoginForm />
-      </section>
-
-      {/* Illustration, centered below the form */}
-      <div className="relative z-10 flex w-full max-w-[480px] items-center justify-center">
+  return (
+    <div className="flex h-[100dvh] w-full items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_80%_72%,#FFF2CA_0%,#FCE8EE_100%)] font-sans text-ink">
+      <div
+        className="relative shrink-0 overflow-hidden bg-[radial-gradient(circle_at_80%_72%,#FFF2CA_0%,#FCE8EE_100%)]"
+        style={{
+          width: DESIGN_WIDTH,
+          height: DESIGN_HEIGHT,
+          transform: `scale(${scale})`,
+        }}
+      >
+        <BrandPanel />
         <LoginIllustration />
       </div>
     </div>
-  </main>
-);
+  );
+};
 
 export default SignInPage;

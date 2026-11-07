@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { register } from '@/api/auth';
 import { ApiError } from '@/api/client';
-import brandDecorationCircle from '@/assets/teller/brand-decoration-circle-large.svg';
 import OtpForm from '@/components/auth/OtpForm';
+import SignupLayout from '@/components/auth/SignupLayout';
 import SignUpForm from '@/components/auth/SignUpForm';
 import type { SignUpDetails } from '@/components/auth/SignUpForm';
 import SignUpSuccess from '@/components/auth/SignUpSuccess';
@@ -32,48 +32,25 @@ const SignUpPage = () => {
   };
 
   return (
-    <main className="min-h-[100dvh] w-full overflow-x-hidden bg-brand-gradient font-sans text-ink">
-      <div className="relative mx-auto flex min-h-[100dvh] w-full max-w-[1440px] flex-col items-center justify-center gap-6 px-5 py-10 sm:px-10 lg:px-14">
-        <img
-          aria-hidden="true"
-          src={brandDecorationCircle}
-          className="pointer-events-none absolute -right-[69px] -top-[52px]"
-          width="427"
-          height="390"
-          alt=""
-        />
+    <SignupLayout>
+      <div className="w-[631px] rounded-[36px] border border-primary bg-page/90 px-[54px] py-6">
+        <div className={step === 'details' ? 'contents' : 'hidden'}>
+          <SignUpForm onSubmit={handleDetails} error={error} submitting={submitting} />
+        </div>
 
-        {/* Card, centered */}
-        <section className="relative z-10 flex w-full max-w-[720px] flex-col items-center gap-4">
-          <div className="flex w-full flex-col rounded-[36px] bg-surface-card px-6 py-8 sm:px-[54px] sm:py-[35px] md:max-h-[780px] md:overflow-y-auto">
-            <div className={step === 'details' ? 'contents' : 'hidden'}>
-              <SignUpForm onSubmit={handleDetails} error={error} submitting={submitting} />
-            </div>
+        {step === 'otp' && (
+          <OtpForm
+            email={destination}
+            onVerified={() => setStep('success')}
+            onBack={() => setStep('details')}
+          />
+        )}
 
-            {step === 'otp' && (
-              <OtpForm
-                email={destination}
-                onVerified={() => setStep('success')}
-                onBack={() => setStep('details')}
-              />
-            )}
-
-            {step === 'success' && (
-              <SignUpSuccess
-                onContinue={() => navigate('/login', { state: { registered: true } })}
-              />
-            )}
-          </div>
-
-          <p className="w-full text-center text-[14px] font-medium leading-[1.21] text-ink">
-            Already have an account?{' '}
-            <Link to="/login" className="font-semibold text-primary hover:underline">
-              Sign in
-            </Link>
-          </p>
-        </section>
+        {step === 'success' && (
+          <SignUpSuccess onContinue={() => navigate('/login', { state: { registered: true } })} />
+        )}
       </div>
-    </main>
+    </SignupLayout>
   );
 };
 
