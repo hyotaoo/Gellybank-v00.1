@@ -9,6 +9,7 @@ import WalletIcon from '@/components/icons/WalletIcon';
 import WithdrawIcon from '@/components/icons/WithdrawIcon';
 import SidebarNavItem from '@/components/dashboard/SidebarNavItem';
 import { setAuthToken } from '@/api/client';
+import { BrandName } from '@/context/BankSettingsContext';
 
 const navItems = [
   { label: 'Dashboard', to: '/dashboard', end: true, icon: <HomeIcon className="h-6 w-6" /> },
@@ -33,7 +34,7 @@ const Sidebar = () => {
     <aside className="relative z-10 flex w-full flex-none flex-col bg-white shadow-[4px_0_20px_1px_rgba(0,0,0,0.05)] lg:h-full lg:w-[363px]">
       <div className="px-4 pt-5 lg:px-[18px] lg:pt-[80px]">
         <h1 className="text-[32px] font-bold leading-none tracking-[-0.02em] text-ink">
-          Gelly<span className="text-primary">Bank!</span>
+          <BrandName />
         </h1>
       </div>
 

@@ -53,7 +53,6 @@ const AdminApplicationsPage = () => {
     <section className="flex flex-col gap-6">
       <header>
         <h1 className="text-3xl font-semibold text-primary">Account applications</h1>
-        <p className="mt-2 text-sm text-muted">Approve or reject pending Checking and Savings account applications.</p>
       </header>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}

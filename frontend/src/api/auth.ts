@@ -21,6 +21,7 @@ export interface AuthUser {
   id: string;
   firstName: string;
   lastName: string;
+  displayName?: string | null;
   email: string;
   role: 'customer' | 'teller' | 'admin';
 }
@@ -63,3 +64,6 @@ export const changePassword = (input: {
   newPassword: string;
 }): Promise<{ message: string }> =>
   apiRequest<{ message: string }>('/auth/change-password', { method: 'POST', body: input });
+
+export const getMe = (scope: 'customer' | 'teller' | 'admin'): Promise<AuthUser> =>
+  apiRequest<AuthUser>('/auth/me', { authScope: scope });

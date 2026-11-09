@@ -46,6 +46,7 @@ CREATE TABLE app_users (
     user_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     customer_id BIGINT UNSIGNED NULL,
     username VARCHAR(50) NOT NULL UNIQUE,
+    display_name VARCHAR(100) NULL,
     password_hash VARCHAR(255) NOT NULL,
 
     role ENUM('ADMIN', 'TELLER', 'CUSTOMER')
@@ -520,5 +521,22 @@ SELECT
 FROM transactions AS t
 JOIN bank_accounts AS a
     ON a.account_id = t.account_id;
+
+
+-- ============================================================
+-- TABLE 15: BANK SETTINGS (single row)
+-- ============================================================
+
+CREATE TABLE bank_settings (
+    setting_id SMALLINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    bank_name VARCHAR(80) NOT NULL DEFAULT 'GellyBank!',
+    contact_email VARCHAR(254) NULL,
+    contact_phone VARCHAR(20) NULL,
+    address VARCHAR(255) NULL,
+    logo_data MEDIUMTEXT NULL,
+    maintenance_mode BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_by_user_id BIGINT UNSIGNED NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
     
     

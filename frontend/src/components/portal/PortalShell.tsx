@@ -1,6 +1,10 @@
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import LogOutIcon from '@/components/icons/LogOutIcon';
+import { getMe } from '@/api/auth';
+import { getAuthToken, type TokenScope } from '@/api/client';
+import { BrandName } from '@/context/BankSettingsContext';
 
 export interface PortalNavItem {
   label: string;
@@ -20,12 +24,30 @@ interface PortalShellProps {
 const PortalShell = ({
   portal,
   navItems,
-  userName,
+  userName: initialUserName,
   userRole,
   signOutTo,
   onSignOut,
 }: PortalShellProps) => {
   const navigate = useNavigate();
+  const [userName, setUserName] = useState(initialUserName);
+
+  useEffect(() => {
+    const scope: TokenScope = signOutTo.startsWith('/admin') ? 'admin' : 'teller';
+    if (!getAuthToken(scope)) return;
+    let cancelled = false;
+    getMe(scope)
+      .then((user) => {
+        if (!cancelled && user.displayName) setUserName(user.displayName);
+      })
+      .catch(() => {
+        // Keep the fallback name on failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signOutTo]);
+
   const initials = userName
     .split(' ')
     .filter(Boolean)
@@ -37,8 +59,8 @@ const PortalShell = ({
     <div className="min-h-[100dvh] bg-[#FFFCF7] font-sans text-ink lg:flex">
       <aside className="flex w-full flex-col border-b border-surface-line bg-white px-4 py-5 lg:min-h-[100dvh] lg:w-[280px] lg:flex-none lg:border-b-0 lg:px-6 lg:py-7 lg:shadow-[4px_0_20px_1px_rgba(0,0,0,0.05)]">
         <div>
-          <h1 className="text-[28px] font-bold leading-none">
-            Gelly<span className="text-primary">Bank!</span>
+          <h1 className="text-[28px] font-bold leading-none text-ink">
+            <BrandName />
           </h1>
           <p className="mt-2 text-sm text-muted">{portal}</p>
         </div>

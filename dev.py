@@ -48,6 +48,7 @@ CONSENT_VERSIONS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "008_consent_v
 DROP_AI_INSIGHTS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "009_drop_ai_insights.sql"
 CARD_LOST_MIGRATION_FILE = BACKEND / "db" / "migrations" / "010_card_lost_requests.sql"
 CUSTOMER_AVATAR_MIGRATION_FILE = BACKEND / "db" / "migrations" / "011_customer_avatar.sql"
+ADMIN_MANAGEMENT_MIGRATION_FILE = BACKEND / "db" / "migrations" / "012_admin_management.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 BACKUP_SCRIPT = ROOT / "scripts" / "backup_db.sh"
 RESTORE_SCRIPT = ROOT / "scripts" / "restore_db.sh"
@@ -729,6 +730,7 @@ def _run_schema_migrations(connection) -> bool:
             DROP_AI_INSIGHTS_MIGRATION_FILE,
             CARD_LOST_MIGRATION_FILE,
             CUSTOMER_AVATAR_MIGRATION_FILE,
+            ADMIN_MANAGEMENT_MIGRATION_FILE,
         ):
             if not migration_file.exists():
                 log_line(f"{relative(migration_file)} is missing.")

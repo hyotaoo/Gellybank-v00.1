@@ -22,13 +22,14 @@ done
 command -v mysql >/dev/null || { echo "mysql not found. Install MySQL client tools." >&2; exit 1; }
 
 if [ $# -ne 1 ]; then
-    echo "Usage: $0 <backup-file.sql>" >&2
+    echo "Usage: $0 <backup-file.sql> [--yes]" >&2
     echo "Available backups:"
     ls -1 backups/*.sql 2>/dev/null || echo "  (none)"
     exit 1
 fi
 
 FILE=$1
+CONFIRMED=${2:-}
 if [ ! -f "$FILE" ]; then
     echo "Backup file not found: $FILE" >&2
     exit 1
@@ -54,10 +55,13 @@ DB_NAME=$(echo "$DATABASE_URL" | sed -E "s#$URL_REGEX#\5#")
 
 echo "Restoring $FILE into database '$DB_NAME' (host ${DB_HOST}:${DB_PORT:-3306})."
 echo "WARNING: this overwrites everything currently in '$DB_NAME'."
-read -r -p "Type the database name to confirm: " CONFIRM
-if [ "$CONFIRM" != "$DB_NAME" ]; then
-    echo "Confirmation does not match. Aborting."
-    exit 1
+
+if [ "$CONFIRMED" != "--yes" ]; then
+    read -r -p "Type the database name to confirm: " CONFIRM
+    if [ "$CONFIRM" != "$DB_NAME" ]; then
+        echo "Confirmation does not match. Aborting."
+        exit 1
+    fi
 fi
 
 mysql \

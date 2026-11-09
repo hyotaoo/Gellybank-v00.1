@@ -68,9 +68,6 @@ const AdminCardRequestsPage = () => {
     <section className="flex flex-col gap-6">
       <header>
         <h1 className="text-3xl font-semibold text-primary">Lost card requests</h1>
-        <p className="mt-2 text-sm text-muted">
-          Approve a replacement card for customers who reported a lost card.
-        </p>
       </header>
 
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}

@@ -4,6 +4,7 @@ import type { PortalNavItem } from '@/components/portal/PortalShell';
 import HomeIcon from '@/components/icons/HomeIcon';
 import ProfileIcon from '@/components/icons/ProfileIcon';
 import BellIcon from '@/components/icons/BellIcon';
+import { BrandName } from '@/context/BankSettingsContext';
 
 const navItems: PortalNavItem[] = [
   { label: 'Dashboard', to: '/dashboard', icon: <HomeIcon className="h-5 w-5" /> },
@@ -14,8 +15,8 @@ const CustomerLayout = ({ title, children }: { title: string; children: ReactNod
   <div className="min-h-[100dvh] bg-[#FFFCF7] font-sans text-ink lg:flex">
     <aside className="flex w-full flex-col border-b border-surface-line bg-white px-4 py-5 lg:min-h-[100dvh] lg:w-[220px] lg:flex-none lg:border-b-0 lg:px-6 lg:py-7 lg:shadow-[4px_0_20px_1px_rgba(0,0,0,0.05)]">
       <div>
-        <h1 className="text-[28px] font-bold leading-none">
-          Gelly<span className="text-primary">Bank!</span>
+        <h1 className="text-[28px] font-bold leading-none text-ink">
+          <BrandName />
         </h1>
         <p className="mt-2 text-sm text-muted">{title}</p>
       </div>

@@ -6,6 +6,7 @@ import { ApiError, setAuthToken } from '@/api/client';
 import EyeIcon from '@/components/icons/EyeIcon';
 import eyeOffIcon from '@/assets/teller/eye-off.svg';
 import brandDecorationCircle from '@/assets/teller/brand-decoration-circle-large.svg';
+import { BrandName } from '@/context/BankSettingsContext';
 
 const AdminLoginPage = () => {
   const navigate = useNavigate();
@@ -43,7 +44,7 @@ const AdminLoginPage = () => {
         {/* Title: top on mobile, right side on desktop */}
         <div className="relative z-10 w-full text-center text-[44px] font-black leading-[1.2] text-white sm:text-[56px] lg:order-2 lg:w-auto lg:flex-1 lg:text-[64px]">
           <p>
-            Gelly<span className="text-brand-accent">Bank</span>
+            <BrandName tailClassName="text-brand-accent" />
           </p>
           <p>Admin Portal</p>
         </div>

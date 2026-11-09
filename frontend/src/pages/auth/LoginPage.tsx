@@ -7,6 +7,7 @@ import vector1 from '@/assets/login/vector-1.svg';
 import vector2 from '@/assets/login/vector-2.svg';
 import vector3 from '@/assets/login/vector-3.svg';
 import vector4 from '@/assets/login/vector-4.svg';
+import { BrandName } from '@/context/BankSettingsContext';
 
 const LoginPage = () => (
   <main className="h-[100dvh] w-full overflow-hidden bg-brand-gradient font-sans text-ink">
@@ -17,7 +18,7 @@ const LoginPage = () => (
         <img src={brandDecorationCircle} className="pointer-events-none absolute -bottom-[195px] -left-[65px]" width="427" height="390" alt="" />
 
         <h1 className="absolute left-[719px] top-[207px] w-[1244px] -translate-x-1/2 text-center text-[96px] font-black leading-none text-white">
-          Welcome to Gelly<span className="text-brand-accent">Bank!</span>
+          Welcome to <BrandName tailClassName="text-brand-accent" />
         </h1>
 
         <div className="absolute left-[462px] top-[369px] flex w-[513px] flex-col items-center gap-4">
@@ -42,7 +43,7 @@ const LoginPage = () => (
     <section className="relative flex h-full flex-col items-center justify-center gap-5 px-6 text-center lg:hidden">
       <img src={brandDecorationCircle} className="pointer-events-none absolute -right-[230px] -top-[180px]" width="427" height="390" alt="" />
       <h1 className="relative text-[52px] font-black leading-none text-white sm:text-[64px]">
-        Welcome to Gelly<span className="text-brand-accent">Bank!</span>
+        Welcome to <BrandName tailClassName="text-brand-accent" />
       </h1>
       <div className="relative flex w-full max-w-[513px] flex-col gap-4">
         <Link to="/signup" className="flex h-[78px] w-full items-center justify-center gap-4 rounded-[36px] bg-surface-card px-4 text-[24px] font-bold leading-none text-ink">

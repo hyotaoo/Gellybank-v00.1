@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BankSettingsProvider } from './context/BankSettingsContext';
 import LoginPage from './pages/auth/LoginPage';
 import SignInPage from './pages/auth/SignInPage';
 import TellerLoginPage from './pages/auth/TellerLoginPage';
@@ -15,6 +16,11 @@ import AdminApplicationsPage from './pages/admin/AdminApplicationsPage';
 import AdminCardRequestsPage from './pages/admin/AdminCardRequestsPage';
 import AdminLogsPage from './pages/admin/AdminLogsPage';
 import AdminBackupsPage from './pages/admin/AdminBackupsPage';
+import AdminAccountsPage from './pages/admin/AdminAccountsPage';
+import AdminTransactionsPage from './pages/admin/AdminTransactionsPage';
+import AdminReportsPage from './pages/admin/AdminReportsPage';
+import AdminSettingsPage from './pages/admin/AdminSettingsPage';
+import AdminProfilePage from './pages/admin/AdminProfilePage';
 import TellerDashboardPage from './pages/teller/TellerDashboardPage';
 import TellerRequestsPage from './pages/teller/TellerRequestsPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
@@ -40,7 +46,8 @@ const RequireToken = ({ scope, redirectTo }: { scope: TokenScope; redirectTo: st
 
 function App() {
   return (
-    <BrowserRouter>
+    <BankSettingsProvider>
+      <BrowserRouter>
       <Routes>
         <Route path="/" element={<LoginPage />} />
         <Route path="/login" element={<SignInPage />} />
@@ -56,10 +63,15 @@ function App() {
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboardPage />} />
             <Route path="users" element={<AdminUsersPage />} />
+            <Route path="accounts" element={<AdminAccountsPage />} />
+            <Route path="transactions" element={<AdminTransactionsPage />} />
+            <Route path="reports" element={<AdminReportsPage />} />
             <Route path="applications" element={<AdminApplicationsPage />} />
             <Route path="card-requests" element={<AdminCardRequestsPage />} />
             <Route path="logs" element={<AdminLogsPage />} />
             <Route path="backups" element={<AdminBackupsPage />} />
+            <Route path="settings" element={<AdminSettingsPage />} />
+            <Route path="profile" element={<AdminProfilePage />} />
           </Route>
         </Route>
 
@@ -87,6 +99,7 @@ function App() {
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
+    </BankSettingsProvider>
   );
 }
 

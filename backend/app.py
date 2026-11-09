@@ -1,12 +1,15 @@
 
 
 import os
+import csv
+import io
 import random
 import base64
 import binascii
 import hashlib
 import hmac
 import secrets
+import subprocess
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -15,7 +18,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, Response
 from werkzeug.exceptions import HTTPException
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -304,6 +307,7 @@ class AppUser(db.Model):
     user_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.customer_id"))
     username = db.Column(db.String(50), nullable=False, unique=True)
+    display_name = db.Column(db.String(100))
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default="CUSTOMER")
     is_active = db.Column(db.Boolean, nullable=False, default=True)
@@ -323,8 +327,9 @@ class AppUser(db.Model):
         customer = self.customer
         return {
             "id": str(self.user_id),
-            "firstName": customer.first_name if customer else self.username,
+            "firstName": customer.first_name if customer else self.display_name or self.username,
             "lastName": customer.last_name if customer else "",
+            "displayName": self.display_name,
             "email": customer.email if customer else self.username,
             "role": {
                 "ADMIN": "admin",
@@ -713,6 +718,59 @@ class AuditLog(db.Model):
         }
 
 
+class BankSetting(db.Model):
+    """Single-row table (setting_id=1) with site-wide bank configuration."""
+    __tablename__ = "bank_settings"
+
+    setting_id = db.Column(SMALL_ID_TYPE, primary_key=True, autoincrement=True)
+    bank_name = db.Column(db.String(80), nullable=False, default="GellyBank!")
+    contact_email = db.Column(db.String(254))
+    contact_phone = db.Column(db.String(20))
+    address = db.Column(db.String(255))
+    logo_data = db.Column(db.Text().with_variant(MEDIUMTEXT(), "mysql"))
+    maintenance_mode = db.Column(db.Boolean, nullable=False, default=False)
+    updated_by_user_id = db.Column(db.BigInteger)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    def public_dict(self):
+        return {
+            "bankName": self.bank_name,
+            "contactEmail": self.contact_email,
+            "contactPhone": self.contact_phone,
+            "address": self.address,
+            "logo": self.logo_data,
+            "maintenanceMode": bool(self.maintenance_mode),
+        }
+
+
+def bank_settings():
+    """Loads (creating once) the single settings row."""
+    setting = db.session.get(BankSetting, 1)
+    if setting is None:
+        setting = BankSetting(setting_id=1)
+        db.session.add(setting)
+        db.session.commit()
+    return setting
+
+
+MAINTENANCE_EXEMPT_PREFIXES = ("/api/settings", "/api/health", "/api/auth/", "/api/admin/")
+
+
+@app.before_request
+def enforce_maintenance_mode():
+    """Customer/teller API calls are blocked while maintenance mode is on."""
+    path = request.path
+    if not path.startswith("/api/") or any(path.startswith(p) for p in MAINTENANCE_EXEMPT_PREFIXES):
+        return None
+    try:
+        settings_row = db.session.get(BankSetting, 1)
+    except SQLAlchemyError:
+        return None
+    if settings_row is None or not settings_row.maintenance_mode:
+        return None
+    return error("The system is down for maintenance. Try again later.", 503, "maintenance")
+
+
 def primary_account_id(customer_id):
     first = (
         BankAccount.query
@@ -805,10 +863,42 @@ def create_account():
 def admin_dashboard():
     try:
         db.session.execute(text("SELECT 1"))
+
+        def tx_sums(start=None):
+            query = Transaction.query.filter(Transaction.status != "VOID")
+            if start:
+                query = query.filter(Transaction.created_at >= start)
+            rows = query.with_entities(
+                Transaction.transaction_type,
+                db.func.count().label("count"),
+                db.func.coalesce(db.func.sum(Transaction.amount), 0).label("total"),
+            ).group_by(Transaction.transaction_type).all()
+            return {
+                row[0].lower(): {"count": row[1], "total": as_number(row[2])}
+                for row in rows
+                if row[0] in ("DEPOSIT", "WITHDRAWAL")
+            }
+
+        day_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        recent_activity = (
+            AuditLog.query
+            .order_by(AuditLog.created_at.desc(), AuditLog.audit_log_id.desc())
+            .limit(8)
+            .all()
+        )
         metrics = {
             "totalUsers": AppUser.query.count(),
+            "totalCustomers": Customer.query.count(),
+            "totalTellers": AppUser.query.filter_by(role="TELLER", is_active=True).count(),
+            "totalTransactions": Transaction.query.count(),
             "pendingApplications": AccountApplication.query.filter_by(status="PENDING").count(),
+            "pendingRequests": TransactionRequest.query.filter_by(status="PENDING").count(),
             "totalAccounts": BankAccount.query.count(),
+            "transactionOverview": {
+                "today": tx_sums(day_start),
+                "lifetime": tx_sums(),
+            },
+            "recentActivity": [entry.to_dict() for entry in recent_activity],
             "systemHealth": "healthy",
         }
     except SQLAlchemyError:
@@ -833,6 +923,16 @@ def admin_list_users():
                 db.cast(AppUser.user_id, db.String).ilike(pattern),
             )
         )
+    role = request.args.get("role", "").lower()
+    if role:
+        if role not in ("admin", "teller", "customer"):
+            return error("Role must be admin, teller, or customer.", 400, "invalid_role")
+        query = query.filter(AppUser.role == role.upper())
+    status = request.args.get("status", "").lower()
+    if status:
+        if status not in ("active", "suspended"):
+            return error("Status must be active or suspended.", 400, "invalid_status")
+        query = query.filter(AppUser.is_active == (status == "active"))
     users = query.order_by(AppUser.user_id.desc()).all()
     return jsonify([
         {
@@ -844,6 +944,80 @@ def admin_list_users():
         }
         for user in users
     ])
+
+
+def admin_user_detail(user):
+    customer = user.customer
+    return {
+        "id": str(user.user_id),
+        "name": customer.full_name if customer else user.username,
+        "email": customer.email if customer else user.username,
+        "role": user.to_dict()["role"],
+        "status": "active" if user.is_active else "suspended",
+        "displayName": user.display_name,
+        "emailVerified": user.email_verified_at is not None,
+        "lastLoginAt": user.last_login_at.isoformat() + "Z" if user.last_login_at else None,
+        "createdAt": user.created_at.isoformat() + "Z" if user.created_at else None,
+        "phone": customer.phone if customer else None,
+        "address": customer.address if customer else None,
+        "customerStatus": customer.status.lower() if customer else None,
+        "accounts": [
+            account_with_owner(account)
+            for account in BankAccount.query
+            .filter_by(customer_id=customer.customer_id)
+            .order_by(BankAccount.account_id)
+            .all()
+        ] if customer else [],
+    }
+
+
+@app.get("/api/admin/users/<user_id>")
+@admin_required
+def admin_get_user(user_id):
+    user = db.session.get(AppUser, as_int(user_id))
+    if not user:
+        return error("User not found.", 404, "not_found")
+    return jsonify(admin_user_detail(user))
+
+
+@app.post("/api/admin/users")
+@admin_required
+def admin_create_user():
+    """Creates a staff (teller/admin) login. Customers self-register instead."""
+    data = body()
+    role = str(data.get("role") or "").lower()
+    if role not in ("teller", "admin"):
+        return error("Role must be teller or admin.", 400, "invalid_role")
+    email = str(data.get("email") or "").strip().lower()
+    if "@" not in email or "." not in email:
+        return error("Enter a valid email address.", 400, "invalid_email")
+    password = str(data.get("password") or "")
+    message, code = validate_password(password)
+    if message:
+        return error(message, 400, code)
+    if (
+        AppUser.query.filter_by(username=email).first()
+        or Customer.query.filter_by(email=email).first()
+    ):
+        return error("An account with that email already exists.", 409, "email_taken")
+
+    user = AppUser(
+        username=email,
+        password_hash=hash_password(password),
+        role=role.upper(),
+        email_verified_at=utcnow(),
+    )
+    db.session.add(user)
+    actor = authenticated_user()
+    log_audit(
+        "USER_CREATED",
+        "APP_USER",
+        entity_id=user.user_id,
+        actor_user_id=actor.user_id,
+        details={"role": role},
+    )
+    db.session.commit()
+    return jsonify(admin_user_detail(user)), 201
 
 
 @app.patch("/api/admin/users/<user_id>")
@@ -1124,8 +1298,206 @@ def admin_list_logs():
         if parsed_actor_id is None:
             return error("Actor ID must be numeric.", 400, "invalid_actor")
         query = query.filter_by(actor_user_id=parsed_actor_id)
-    entries = query.order_by(AuditLog.created_at.desc()).limit(200).all()
+    action = (request.args.get("action") or "").strip()
+    if action:
+        query = query.filter(AuditLog.action.ilike(f"%{action}%"))
+    entity_type = (request.args.get("entityType") or "").strip()
+    if entity_type:
+        query = query.filter(AuditLog.entity_type.ilike(f"%{entity_type}%"))
+    date_from = parse_date(request.args.get("from"))
+    date_to = parse_date(request.args.get("to"))
+    if date_from:
+        query = query.filter(AuditLog.created_at >= date_from)
+    if date_to:
+        query = query.filter(AuditLog.created_at < date_to + timedelta(days=1))
+    entries = query.order_by(AuditLog.created_at.desc(), AuditLog.audit_log_id.desc()).limit(200).all()
     return jsonify([entry.to_dict() for entry in entries])
+
+
+LOGIN_HISTORY_ACTIONS = ("LOGIN_SUCCESS", "LOGIN_FAILED", "FAILED_LOGIN_SPIKE")
+
+
+@app.get("/api/admin/login-history")
+@admin_required
+def admin_login_history():
+    """Recent successful + failed logins, derived from the audit trail."""
+    email = (request.args.get("email") or "").strip()
+    query = AuditLog.query.filter(AuditLog.action.in_(LOGIN_HISTORY_ACTIONS))
+    rows = (
+        query
+        .order_by(AuditLog.created_at.desc(), AuditLog.audit_log_id.desc())
+        .limit(200)
+        .all()
+    )
+    if email:
+        rows = [
+            row for row in rows
+            if str((row.details or {}).get("accountKey") or "").lower() == email.lower()
+        ]
+    return jsonify([
+        {
+            "id": str(row.audit_log_id),
+            "action": row.action,
+            "email": (row.details or {}).get("accountKey"),
+            "userId": (row.details or {}).get("attemptedUserId"),
+            "ipAddress": row.ip_address or (row.details or {}).get("ipAddress"),
+            "severity": row.severity,
+            "createdAt": row.created_at.isoformat() + "Z" if row.created_at else None,
+        }
+        for row in rows
+    ])
+
+
+@app.get("/api/admin/security-summary")
+@admin_required
+def admin_security_summary():
+    """Counters for the security monitoring tab."""
+    now = utcnow()
+    hour_start = now - timedelta(hours=1)
+    day_start = now - timedelta(hours=24)
+
+    def count_recent(action, since):
+        return AuditLog.query.filter(
+            AuditLog.action == action,
+            AuditLog.created_at >= since,
+        ).count()
+
+    return jsonify({
+        "failedLogins24h": count_recent("LOGIN_FAILED", day_start),
+        "failedLogins1h": count_recent("LOGIN_FAILED", hour_start),
+        "successfulLogins24h": count_recent("LOGIN_SUCCESS", day_start),
+        "loginSpikes24h": count_recent("FAILED_LOGIN_SPIKE", day_start),
+        "warnings24h": AuditLog.query.filter(
+            AuditLog.severity == "WARN",
+            AuditLog.created_at >= day_start,
+        ).count(),
+        "errors24h": AuditLog.query.filter(
+            AuditLog.severity == "ERROR",
+            AuditLog.created_at >= day_start,
+        ).count(),
+    })
+
+
+@app.get("/api/settings")
+def public_bank_settings():
+    """Public bank settings for branding on the customer-facing UI."""
+    return jsonify(bank_settings().public_dict())
+
+
+@app.get("/api/admin/settings")
+@admin_required
+def admin_get_settings():
+    return jsonify(bank_settings().public_dict())
+
+
+@app.patch("/api/admin/settings")
+@admin_required
+def admin_update_settings():
+    data = body()
+    updates = []
+    setting = bank_settings()
+
+    if "bankName" in data:
+        bank_name = str(data["bankName"] or "").strip()
+        if not bank_name:
+            return error("Bank name is required.", 400, "invalid_bank_name")
+        if len(bank_name) > 80:
+            return error("Bank name must be 80 characters or fewer.", 400, "invalid_bank_name")
+        setting.bank_name = bank_name
+        updates.append("bankName")
+    if "contactEmail" in data:
+        contact_email = str(data["contactEmail"] or "").strip() or None
+        if contact_email and ("@" not in contact_email or "." not in contact_email):
+            return error("Enter a valid contact email address.", 400, "invalid_email")
+        setting.contact_email = contact_email
+        updates.append("contactEmail")
+    if "contactPhone" in data:
+        contact_phone = str(data["contactPhone"] or "").strip() or None
+        if contact_phone and (len(contact_phone) > 20 or not all(ch.isdigit() or ch in "+-() " for ch in contact_phone)):
+            return error("Contact phone must be 20 digits/–, spaces and parentheses at most.", 400, "invalid_phone")
+        setting.contact_phone = contact_phone
+        updates.append("contactPhone")
+    if "address" in data:
+        setting.address = str(data["address"] or "").strip()[:255] or None
+        updates.append("address")
+    if "maintenanceMode" in data:
+        if not isinstance(data["maintenanceMode"], bool):
+            return error("maintenanceMode must be a boolean.", 400, "invalid_maintenance")
+        setting.maintenance_mode = data["maintenanceMode"]
+        updates.append("maintenanceMode")
+    if "logo" in data:
+        raw_logo = data["logo"]
+        if raw_logo in (None, ""):
+            setting.logo_data = None
+        else:
+            if not isinstance(raw_logo, str) or len(raw_logo) > 2_000_000:
+                return error("Logo must be an image up to 1 MB.", 400, "invalid_logo")
+            mime, separator, payload = raw_logo.partition(";base64,")
+            if not separator or mime not in ("data:image/png", "data:image/jpeg", "data:image/webp"):
+                return error("Logo must be a PNG, JPG, or WebP image.", 400, "invalid_logo")
+            try:
+                decoded = base64.b64decode(payload, validate=True)
+            except (binascii.Error, ValueError):
+                return error("Logo is not a valid image.", 400, "invalid_logo")
+            if len(decoded) > 1_048_576:
+                return error("Logo must be an image up to 1 MB.", 400, "invalid_logo")
+            setting.logo_data = raw_logo
+        updates.append("logo")
+
+    if not updates:
+        return error("Nothing to update.", 400, "no_changes")
+
+    actor = authenticated_user()
+    setting.updated_by_user_id = actor.user_id
+    log_audit(
+        "BANK_SETTINGS_UPDATED",
+        "BANK_SETTINGS",
+        actor_user_id=actor.user_id,
+        severity="WARN" if "maintenanceMode" in updates else "INFO",
+        details={"fields": updates, "maintenanceMode": bool(setting.maintenance_mode)},
+    )
+    db.session.commit()
+    return jsonify(setting.public_dict())
+
+
+@app.get("/api/auth/me")
+@authenticated_required
+def whoami():
+    """Identity for the signed-in staff/customer user."""
+    return jsonify(current_user().to_dict())
+
+
+@app.get("/api/admin/profile")
+@admin_required
+def admin_get_profile():
+    actor = authenticated_user()
+    detail = admin_user_detail(actor)
+    detail["displayName"] = actor.display_name
+    return jsonify(detail)
+
+
+@app.patch("/api/admin/profile")
+@admin_required
+def admin_update_profile():
+    data = body()
+    actor = authenticated_user()
+    if "displayName" in data:
+        display_name = str(data["displayName"] or "").strip()
+        if not display_name:
+            return error("Display name cannot be empty.", 400, "invalid_name")
+        if len(display_name) > 100:
+            return error("Display name must be 100 characters or fewer.", 400, "invalid_name")
+        actor.display_name = display_name
+        log_audit(
+            "USER_PROFILE_UPDATED",
+            "APP_USER",
+            entity_id=actor.user_id,
+            actor_user_id=actor.user_id,
+            details={"displayName": display_name},
+        )
+        db.session.commit()
+        return jsonify(admin_user_detail(actor))
+    return error("Nothing to update.", 400, "no_changes")
 
 
 @app.get("/api/admin/backups")
@@ -1158,6 +1530,112 @@ def admin_download_backup(filename):
         download_name=path.name,
         mimetype="application/sql",
     )
+
+
+BACKUP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "backup_db.sh"
+RESTORE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "restore_db.sh"
+
+
+def run_project_script(script_path, *args):
+    result = subprocess.run(
+        ["bash", str(script_path), *(str(arg) for arg in args)],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    return result
+
+
+def admin_backup_summaries():
+    if not BACKUP_DIR.is_dir():
+        return []
+    return [
+        {
+            "name": path.name,
+            "size": path.stat().st_size,
+            "createdAt": datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(),
+        }
+        for path in sorted(
+            BACKUP_DIR.glob("*.sql"), key=lambda entry: entry.stat().st_mtime, reverse=True
+        )
+    ]
+
+
+@app.post("/api/admin/backups")
+@admin_required
+def admin_generate_backup():
+    """Dumps the database via scripts/backup_db.sh; the file auto-downloads on
+    success from the UI."""
+    if not BACKUP_SCRIPT.is_file():
+        return error("The backup script is not available.", 503, "script_missing")
+    try:
+        result = run_project_script(BACKUP_SCRIPT)
+    except subprocess.TimeoutExpired:
+        return error("The backup timed out.", 503, "backup_timeout")
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        return error(detail[-1] if detail else "Backup generation failed.", 503, "backup_failed")
+
+    latest = admin_backup_summaries()
+    if not latest:
+        return error("Backup generation produced no file.", 503, "backup_failed")
+
+    actor = authenticated_user()
+    log_audit(
+        "BACKUP_GENERATED",
+        "BACKUP",
+        actor_user_id=actor.user_id,
+        details={"file": latest[0]["name"]},
+    )
+    db.session.commit()
+    return jsonify({"backups": latest, "generated": latest[0]["name"]}), 201
+
+
+@app.post("/api/admin/backups/restore")
+@admin_required
+def admin_restore_backup():
+    """Restores a backup file. Requires explicit typed confirmation because the
+    database is overwritten."""
+    data = body()
+    filename = str(data.get("filename") or "")
+    confirmation = str(data.get("confirm") or "").strip()
+
+    if not filename.endswith(".sql") or Path(filename).name != filename:
+        return error("Backup file not found.", 404, "not_found")
+    path = (BACKUP_DIR / filename).resolve()
+    if path.parent != BACKUP_DIR.resolve() or not path.is_file():
+        return error("Backup file not found.", 404, "not_found")
+
+    if confirmation != "RESTORE":
+        return error(
+            "Type RESTORE to confirm overwriting the database.",
+            400,
+            "confirmation_invalid",
+        )
+    if not RESTORE_SCRIPT.is_file():
+        return error("The restore script is not available.", 503, "script_missing")
+
+    try:
+        result = run_project_script(RESTORE_SCRIPT, path, "--yes")
+    except subprocess.TimeoutExpired:
+        return error("The restore timed out.", 503, "restore_timeout")
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        return error(detail[-1] if detail else "Restore failed.", 503, "restore_failed")
+
+    # Sessions may hold pre-restore data; drop cached state.
+    db.session.remove()
+
+    actor = authenticated_user()
+    log_audit(
+        "BACKUP_RESTORED",
+        "BACKUP",
+        actor_user_id=actor.user_id,
+        severity="WARN",
+        details={"file": filename},
+    )
+    db.session.commit()
+    return jsonify({"message": f"Database restored from {filename}."})
 
 
 def account_with_owner(account):
@@ -1256,16 +1734,63 @@ def admin_update_account_status(account_id):
     return jsonify(account_with_owner(account))
 
 
+def admin_transaction_row(tx):
+    account = db.session.get(BankAccount, tx.account_id)
+    customer = db.session.get(Customer, account.customer_id) if account else None
+    item = tx.to_dict()
+    item["accountNumber"] = account.account_number if account else None
+    item["accountLabel"] = account.type_name.capitalize() if account else None
+    item["customerName"] = customer.full_name if customer else None
+    item["customerEmail"] = customer.email if customer else None
+    staff = db.session.get(AppUser, tx.performed_by_user_id) if tx.performed_by_user_id else None
+    item["performedBy"] = staff.role.lower() if staff else None
+    return item
+
+
 @app.get("/api/admin/transactions")
 @staff_required
 def admin_list_transactions():
     """Admin monitors all transactions without modifying them."""
     query = Transaction.query
-    tx_type = request.args.get("type", "").upper()
+    tx_type = request.args.get("type", "").lower()
+    type_map = {
+        "deposit": ["DEPOSIT"],
+        "withdrawal": ["WITHDRAWAL"],
+        "transfer": ["TRANSFER_IN", "TRANSFER_OUT"],
+        "adjustment": ["ADJUSTMENT"],
+    }
     if tx_type:
-        if tx_type not in ("DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT", "ADJUSTMENT"):
+        if tx_type not in type_map:
             return error("Invalid transaction type filter.", 400, "invalid_type")
-        query = query.filter_by(transaction_type=tx_type)
+        query = query.filter(Transaction.transaction_type.in_(type_map[tx_type]))
+    status = request.args.get("status", "").lower()
+    if status:
+        if status not in ("completed", "void"):
+            return error("Status must be completed or void.", 400, "invalid_status")
+        query = query.filter(Transaction.status == status.upper())
+    search = request.args.get("search", "").strip()
+    if search:
+        pattern = f"%{search}%"
+        query = (
+            query.join(BankAccount, Transaction.account_id == BankAccount.account_id)
+            .outerjoin(Customer, BankAccount.customer_id == Customer.customer_id)
+            .filter(
+                db.or_(
+                    Transaction.reference_code.ilike(pattern),
+                    Transaction.description.ilike(pattern),
+                    BankAccount.account_number.ilike(pattern),
+                    Customer.first_name.ilike(pattern),
+                    Customer.last_name.ilike(pattern),
+                    Customer.email.ilike(pattern),
+                )
+            )
+        )
+    date_from = parse_date(request.args.get("from"))
+    date_to = parse_date(request.args.get("to"))
+    if date_from:
+        query = query.filter(Transaction.created_at >= date_from)
+    if date_to:
+        query = query.filter(Transaction.created_at < date_to + timedelta(days=1))
     limit = request.args.get("limit", type=int) or 50
     limit = max(1, min(limit, 200))
     transactions = (
@@ -1274,26 +1799,137 @@ def admin_list_transactions():
         .limit(limit)
         .all()
     )
-    result = []
-    for tx in transactions:
-        item = tx.to_dict()
-        staff = db.session.get(AppUser, tx.performed_by_user_id) if tx.performed_by_user_id else None
-        item["performedBy"] = staff.role.lower() if staff else None
-        result.append(item)
-    return jsonify(result)
+    return jsonify([admin_transaction_row(tx) for tx in transactions])
+
+
+@app.get("/api/admin/transactions/<tx_id>")
+@staff_required
+def admin_get_transaction(tx_id):
+    tx = db.session.get(Transaction, as_int(tx_id))
+    if not tx:
+        return error("Transaction not found.", 404, "not_found")
+    account = db.session.get(BankAccount, tx.account_id)
+    performed_by = None
+    if tx.performed_by_user_id:
+        performed_by = db.session.get(AppUser, tx.performed_by_user_id)
+    item = admin_transaction_row(tx)
+    item["performedBy"] = performed_by.role.lower() if performed_by else None
+    item["account"] = account_with_owner(account) if account else None
+    return jsonify(item)
+
+
+@app.post("/api/admin/transactions/<tx_id>/reverse")
+@admin_required
+def admin_reverse_transaction(tx_id):
+    """Authorised correction: undoes a completed transaction with a
+    compensating ADJUSTMENT and voids the original."""
+    tx = db.session.get(Transaction, as_int(tx_id))
+    if not tx:
+        return error("Transaction not found.", 404, "not_found")
+    if tx.status == "VOID":
+        return error("This transaction is already void.", 409, "already_void")
+
+    data = body()
+    reason = str(data.get("reason") or "").strip()
+    if not reason:
+        return error("A reversal reason is required.", 400, "reason_required")
+    if len(reason) > 500:
+        return error("The reversal reason is 500 characters or fewer.", 400, "reason_too_long")
+
+    adjustments = []
+    if tx.transfer_id:
+        transfer = db.session.get(Transfer, tx.transfer_id)
+        if not transfer:
+            return error("Transfer not found.", 404, "not_found")
+        adjustments = [
+            (transfer.to_account_id, -transfer.amount),
+            (transfer.from_account_id, transfer.amount),
+        ]
+    elif tx.transaction_type == "DEPOSIT":
+        adjustments = [(tx.account_id, -tx.amount)]
+    elif tx.transaction_type == "WITHDRAWAL":
+        adjustments = [(tx.account_id, tx.amount)]
+    else:
+        return error(
+            "Only deposits, withdrawals, and transfers can be reversed.",
+            400,
+            "reversal_unsupported",
+        )
+
+    try:
+        locked_accounts = {}
+        for account_id, delta in adjustments:
+            locked = BankAccount.query.filter_by(
+                account_id=account_id
+            ).with_for_update().first()
+            if not locked:
+                return error("Account not found.", 404, "not_found")
+            if locked.current_balance + delta < 0:
+                return error(
+                    "Reversing this transaction would leave the account below zero. "
+                    "Deposits cannot be reversed after the funds have been spent.",
+                    409,
+                    "insufficient_funds",
+                )
+            locked.current_balance += delta
+            locked_accounts[account_id] = locked
+
+        actor = authenticated_user()
+        note = "Reversal of " + tx.reference_code + ": " + reason
+        for account_id, delta in adjustments:
+            db.session.add(Transaction(
+                account_id=account_id,
+                transaction_type="ADJUSTMENT",
+                amount=abs(delta),
+                balance_after=locked_accounts[account_id].current_balance,
+                reference_code=new_reference(),
+                description=note,
+                performed_by_user_id=actor.user_id,
+            ))
+
+        if tx.transfer_id:
+            for leg in Transaction.query.filter_by(transfer_id=tx.transfer_id).all():
+                leg.status = "VOID"
+            transfer = db.session.get(Transfer, tx.transfer_id)
+            transfer.status = "REVERSED"
+        else:
+            tx.status = "VOID"
+
+        log_audit(
+            "TRANSACTION_REVERSED",
+            "TRANSACTION",
+            entity_id=tx.transaction_id,
+            actor_user_id=actor.user_id,
+            severity="WARN",
+            details={
+                "reference": tx.reference_code,
+                "amount": as_number(tx.amount),
+                "reason": reason,
+            },
+        )
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return error("Unable to reverse this transaction.", 503, "system_unavailable")
+
+    return jsonify(admin_transaction_row(tx))
 
 
 @app.get("/api/admin/reports")
 @admin_required
 def admin_reports():
     """Basic operational report: totals and counts, ignoring voided transactions."""
+    date_from = parse_date(request.args.get("from"))
+    date_to = parse_date(request.args.get("to"))
     active_filter = Transaction.status != "VOID"
     done = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
-    def sums(start=None):
+    def sums(start=None, end=None):
         query = Transaction.query.filter(active_filter)
         if start:
             query = query.filter(Transaction.created_at >= start)
+        if end:
+            query = query.filter(Transaction.created_at < end + timedelta(days=1))
         rows = query.with_entities(
             Transaction.transaction_type,
             db.func.count().label("count"),
@@ -1316,10 +1952,56 @@ def admin_reports():
         db_check = True
     except SQLAlchemyError:
         db.session.rollback()
+
+    teller_volume_query = (
+        Transaction.query
+        .filter(active_filter, Transaction.performed_by_user_id.isnot(None))
+    )
+    if date_from:
+        teller_volume_query = teller_volume_query.filter(Transaction.created_at >= date_from)
+    if date_to:
+        teller_volume_query = teller_volume_query.filter(
+            Transaction.created_at < date_to + timedelta(days=1)
+        )
+    teller_rows = (
+        teller_volume_query
+        .join(AppUser, Transaction.performed_by_user_id == AppUser.user_id)
+        .with_entities(
+            Transaction.performed_by_user_id,
+            db.func.count().label("count"),
+            db.func.coalesce(db.func.sum(Transaction.amount), 0).label("total"),
+        )
+        .group_by(Transaction.performed_by_user_id)
+        .order_by(db.func.count().desc())
+        .all()
+    )
+    new_customers = Customer.query
+    if date_from:
+        new_customers = new_customers.filter(Customer.created_at >= date_from)
+    if date_to:
+        new_customers = new_customers.filter(Customer.created_at < date_to + timedelta(days=1))
+
     return jsonify({
         "accounts": counts,
         "lifetimeByType": sums(),
         "todayByType": sums(done),
+        "rangeByType": sums(date_from, date_to) if (date_from or date_to) else sums(),
+        "tellerStats": [
+            {
+                "id": str(row[0]),
+                "name": db.session.get(AppUser, row[0]).username,
+                "transactions": row[1],
+                "total": as_number(row[2]),
+            }
+            for row in teller_rows
+        ],
+        "customerStats": {
+            "totalCustomers": counts["customers"],
+            "newCustomers": new_customers.count(),
+            "totalAccounts": counts["accounts"],
+            "activeAccounts": counts["activeAccounts"],
+            "frozenAccounts": counts["frozenAccounts"],
+        },
         "deployedBalance": as_number(
             db.session.query(
                 db.func.coalesce(db.func.sum(BankAccount.current_balance), 0)
@@ -1327,6 +2009,51 @@ def admin_reports():
         ),
         "systemHealth": "healthy" if db_check else "degraded",
     })
+
+
+@app.get("/api/admin/reports/export")
+@admin_required
+def admin_reports_export():
+    """CSV export of transactions for recordkeeping (opens in Excel)."""
+    date_from = parse_date(request.args.get("from"))
+    date_to = parse_date(request.args.get("to"))
+    query = Transaction.query
+    if date_from:
+        query = query.filter(Transaction.created_at >= date_from)
+    if date_to:
+        query = query.filter(Transaction.created_at < date_to + timedelta(days=1))
+    transactions = query.order_by(Transaction.created_at.asc()).all()
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        "reference", "date", "type", "amount", "currency", "status",
+        "account", "customer", "note", "performed_by",
+    ])
+    for tx in transactions:
+        account = db.session.get(BankAccount, tx.account_id)
+        customer = db.session.get(Customer, account.customer_id) if account else None
+        staff = db.session.get(AppUser, tx.performed_by_user_id) if tx.performed_by_user_id else None
+        writer.writerow([
+            tx.reference_code,
+            tx.created_at.isoformat() if tx.created_at else "",
+            tx.transaction_type.lower(),
+            as_number(tx.amount),
+            DEFAULT_CURRENCY,
+            tx.status.lower(),
+            account.account_number if account else "",
+            customer.full_name if customer else "",
+            tx.description or "",
+            staff.username if staff else "",
+        ])
+    response = Response(buffer.getvalue(), mimetype="text/csv")
+    filename = "gellybank_transactions"
+    if date_from:
+        filename += f"_{date_from.isoformat()}"
+    if date_to:
+        filename += f"-{date_to.isoformat()}"
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}.csv"'
+    return response
 
 
 @app.get("/api/accounts/<account_id>")
@@ -2663,6 +3390,15 @@ def login():
 
     user.last_login_at = utcnow()
     clear_login_attempts(email, ip_address)
+    log_audit(
+        "LOGIN_SUCCESS",
+        "AUTH",
+        actor_user_id=user.user_id,
+        details={
+            "accountKey": email,
+            "ipAddress": ip_address,
+        },
+    )
     db.session.commit()
 
     return jsonify({"user": user.to_dict(), "token": make_token(user)})

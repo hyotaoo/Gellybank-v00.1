@@ -42,6 +42,8 @@ interface RequestOptions {
   method?: HttpMethod;
   body?: unknown;
   signal?: AbortSignal;
+  /** Overrides the token scope derived from the path. */
+  authScope?: TokenScope;
 }
 
 const errorFromResponse = async (response: Response): Promise<ApiError> => {
@@ -63,12 +65,12 @@ const errorFromResponse = async (response: Response): Promise<ApiError> => {
 };
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal } = options;
+  const { method = 'GET', body, signal, authScope } = options;
 
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
-  const token = getAuthToken(tokenScopeForPath(path));
+  const token = getAuthToken(authScope ?? tokenScopeForPath(path));
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
