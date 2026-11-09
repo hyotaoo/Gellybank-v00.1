@@ -4,12 +4,15 @@ import {
   downloadBackup,
   generateBackup,
   listBackups,
-  restoreBackup,
+  restoreBackupFromFile,
 } from '@/api/admin';
 import type { BackupFile } from '@/api/admin';
 import Button from '@/components/common/Button';
 import Input from '@/components/common/Input';
-import Select from '@/components/common/Select';
+import usePolling from '@/hooks/usePolling';
+
+const HEADER_BUTTON_CLASS = 'h-[48px] px-6 text-[15px] font-semibold';
+const ROW_BUTTON_CLASS = 'h-[40px] px-5 text-[14px] font-semibold';
 
 const formatSize = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -24,12 +27,12 @@ const AdminBackupsPage = () => {
   const [downloading, setDownloading] = useState<string>();
   const [generating, setGenerating] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [restoreName, setRestoreName] = useState('');
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [showRestoreForm, setShowRestoreForm] = useState(false);
 
-  const refresh = async () => {
-    setLoading(true);
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setBackups(await listBackups());
@@ -43,6 +46,9 @@ const AdminBackupsPage = () => {
   useEffect(() => {
     void refresh();
   }, []);
+
+  // Keep the backup list current without a manual reload.
+  usePolling(() => { void refresh(true); });
 
   const triggerDownload = (name: string, blob: Blob) => {
     const url = URL.createObjectURL(blob);
@@ -86,13 +92,14 @@ const AdminBackupsPage = () => {
   };
 
   const handleRestore = async () => {
+    if (!restoreFile) return;
     setRestoring(true);
     setError(undefined);
     try {
-      await restoreBackup(restoreName);
+      await restoreBackupFromFile(restoreFile);
       await refresh();
       setShowRestoreForm(false);
-      setRestoreName('');
+      setRestoreFile(null);
       setRestoreConfirm('');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to restore the backup.');
@@ -110,16 +117,17 @@ const AdminBackupsPage = () => {
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={() => void handleGenerate()} disabled={generating}>
+        <Button onClick={() => void handleGenerate()} disabled={generating} className={HEADER_BUTTON_CLASS}>
           {generating ? 'Generating…' : 'Generate backup'}
         </Button>
         <Button
+          type="button"
           variant="secondary"
+          className={`${HEADER_BUTTON_CLASS} text-red-700 hover:text-ink`}
           onClick={() => {
             setShowRestoreForm((open) => !open);
             setRestoreConfirm('');
           }}
-          disabled={backups.length === 0 && !showRestoreForm}
         >
           {showRestoreForm ? 'Cancel restore' : 'Restore a backup'}
         </Button>
@@ -132,20 +140,35 @@ const AdminBackupsPage = () => {
             this only to recover from data loss.
           </p>
           <label className="flex flex-col gap-2 text-sm font-medium text-ink">
-            Backup file
-            <div className="max-w-md">
-              <Select
-                value={restoreName}
-                onChange={(event) => setRestoreName(event.target.value)}
-              >
-                <option value="">Select a backup…</option>
-                {backups.map((backup) => (
-                  <option key={backup.name} value={backup.name}>
-                    {backup.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            Backup file (choose from this computer)
+            <span className="flex flex-wrap items-center gap-3">
+              <label className="inline-flex h-[48px] cursor-pointer items-center rounded-[20px] bg-surface-card px-6 text-[15px] font-semibold text-ink transition-colors hover:bg-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-primary-hover">
+                Choose .sql file
+                <input
+                  type="file"
+                  accept=".sql,application/sql"
+                  className="hidden"
+                  onChange={(event) => {
+                    setRestoreFile(event.target.files?.[0] ?? null);
+                    event.target.value = '';
+                  }}
+                />
+              </label>
+              <span className="text-sm">
+                {restoreFile
+                  ? `${restoreFile.name} (${formatSize(restoreFile.size)})`
+                  : 'No file selected'}
+              </span>
+              {restoreFile && (
+                <button
+                  type="button"
+                  className="text-sm text-red-700 hover:underline"
+                  onClick={() => setRestoreFile(null)}
+                >
+                  Remove
+                </button>
+              )}
+            </span>
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium text-ink">
             Type RESTORE to confirm
@@ -162,8 +185,8 @@ const AdminBackupsPage = () => {
             <button
               type="button"
               onClick={() => void handleRestore()}
-              disabled={restoring || !restoreName || restoreConfirm !== 'RESTORE'}
-              className="rounded-[20px] bg-red-700 px-4 py-2 font-semibold text-white transition-colors hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={restoring || !restoreFile || restoreConfirm !== 'RESTORE'}
+              className="h-[48px] rounded-[20px] bg-red-700 px-6 text-[15px] font-semibold text-white transition-colors hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {restoring ? 'Restoring…' : 'Restore database'}
             </button>
@@ -186,14 +209,13 @@ const AdminBackupsPage = () => {
                   <td className="whitespace-nowrap px-4 py-3">{formatSize(backup.size)}</td>
                   <td className="whitespace-nowrap px-4 py-3">{backup.createdAt ? new Date(backup.createdAt).toLocaleString() : '—'}</td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
+                    <Button
                       onClick={() => void handleDownload(backup.name)}
                       disabled={downloading === backup.name}
-                      className="rounded-xl bg-primary px-4 py-2 font-semibold text-ink disabled:opacity-60"
+                      className={ROW_BUTTON_CLASS}
                     >
                       {downloading === backup.name ? 'Downloading…' : 'Download'}
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}

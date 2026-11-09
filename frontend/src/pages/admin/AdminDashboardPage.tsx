@@ -12,6 +12,7 @@ import ProfileIcon from '@/components/icons/ProfileIcon';
 import TransferIcon from '@/components/icons/TransferIcon';
 import WalletIcon from '@/components/icons/WalletIcon';
 import WithdrawIcon from '@/components/icons/WithdrawIcon';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
 const quickActions = [
@@ -36,30 +37,32 @@ const AdminDashboardPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
 
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const load = async () => {
+  const load = async (silent = false) => {
+    if (!silent) {
       setLoading(true);
       setError(undefined);
-      try {
-        const [nextMetrics, nextApplications] = await Promise.all([
-          getAdminDashboard(controller.signal),
-          listAccountApplications('pending', controller.signal),
-        ]);
-        setMetrics(nextMetrics);
-        setApplications(nextApplications);
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        setError(err instanceof ApiError ? err.message : 'Unable to load the dashboard.');
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    };
+    }
+    try {
+      const [nextMetrics, nextApplications] = await Promise.all([
+        getAdminDashboard(),
+        listAccountApplications('pending'),
+      ]);
+      setMetrics(nextMetrics);
+      setApplications(nextApplications);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to load the dashboard.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     void load();
-    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the dashboard current without a manual reload.
+  usePolling(() => { void load(true); });
 
   const healthy = metrics?.systemHealth === 'healthy';
 

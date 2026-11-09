@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError } from '@/api/client';
 import { exportAdminReports, getAdminReports } from '@/api/admin';
@@ -6,6 +6,7 @@ import type { ReportsSummary } from '@/api/admin';
 import Button from '@/components/common/Button';
 import DepositIcon from '@/components/icons/DepositIcon';
 import WithdrawIcon from '@/components/icons/WithdrawIcon';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
 const TYPE_LABELS: Record<string, string> = {
@@ -33,8 +34,8 @@ const AdminReportsPage = () => {
   const [error, setError] = useState<string>();
   const [exporting, setExporting] = useState(false);
 
-  const load = useCallback(async (rangeFrom = '', rangeTo = '') => {
-    setLoading(true);
+  const load = async (rangeFrom = '', rangeTo = '', silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setReport(await getAdminReports({
@@ -46,11 +47,15 @@ const AdminReportsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep the report current without a manual reload.
+  usePolling(() => { void load(from, to, true); });
 
   const applyRange = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -117,7 +122,9 @@ const AdminReportsPage = () => {
             className="rounded-xl border border-surface-line bg-white px-3 py-2"
           />
         </label>
-        <button type="submit" className="rounded-xl bg-primary px-5 font-semibold text-ink">Apply</button>
+        <Button type="submit" className="h-[44px] px-5 text-[14px] font-semibold">
+          Apply
+        </Button>
       </form>
 
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}

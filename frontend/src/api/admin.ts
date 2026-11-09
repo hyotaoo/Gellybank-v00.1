@@ -1,4 +1,4 @@
-import { apiDownload, apiRequest } from '@/api/client';
+import { apiDownload, apiRequest, apiUpload } from '@/api/client';
 import type { TellerRequest } from '@/api/requests';
 
 export type AdminRole = 'admin' | 'teller' | 'customer';
@@ -310,6 +310,14 @@ export const restoreBackup = (name: string): Promise<{ message: string }> =>
     method: 'POST',
     body: { filename: name, confirm: 'RESTORE' },
   });
+
+/** Restores a .sql dump the admin uploads from their own machine. */
+export const restoreBackupFromFile = (file: File): Promise<{ message: string }> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('confirm', 'RESTORE');
+  return apiUpload<{ message: string }>('/admin/backups/restore-upload', formData);
+};
 
 export interface BankSettings {
   bankName: string;

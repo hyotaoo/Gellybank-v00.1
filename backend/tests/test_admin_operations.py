@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 import unittest
@@ -749,6 +750,90 @@ class AdminOperationsTests(unittest.TestCase):
             ).status_code,
             400,
         )
+
+    def test_admin_restore_backup_from_upload(self):
+        import types
+
+        with tempfile.TemporaryDirectory() as directory:
+            backup_dir = Path(directory)
+            original_dir = backend.BACKUP_DIR
+            original_run = backend.run_project_script
+            backend.BACKUP_DIR = backup_dir
+
+            calls = []
+
+            def fake_run(script_path, *args):
+                calls.append([str(arg) for arg in (script_path, *args)])
+                payload = Path(str(args[0])).read_bytes()
+                self.assertEqual(payload, b"SELECT 1;\n")
+                return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            backend.run_project_script = fake_run
+            try:
+                headers = self.auth_headers(self.admin_token)
+
+                no_file = self.client.post(
+                    "/api/admin/backups/restore-upload",
+                    headers=headers,
+                    data={"confirm": "RESTORE"},
+                    content_type="multipart/form-data",
+                )
+                self.assertEqual(no_file.status_code, 400)
+                self.assertEqual(no_file.json["code"], "file_missing")
+
+                invalid_confirm = self.client.post(
+                    "/api/admin/backups/restore-upload",
+                    headers=headers,
+                    data={"file": (io.BytesIO(b"SELECT 1;\n"), "dump.sql"), "confirm": "yes"},
+                    content_type="multipart/form-data",
+                )
+                self.assertEqual(invalid_confirm.status_code, 400)
+                self.assertEqual(invalid_confirm.json["code"], "confirmation_invalid")
+
+                wrong_type = self.client.post(
+                    "/api/admin/backups/restore-upload",
+                    headers=headers,
+                    data={"file": (io.BytesIO(b"hello"), "dump.txt"), "confirm": "RESTORE"},
+                    content_type="multipart/form-data",
+                )
+                self.assertEqual(wrong_type.status_code, 400)
+                self.assertEqual(wrong_type.json["code"], "file_invalid")
+
+                empty = self.client.post(
+                    "/api/admin/backups/restore-upload",
+                    headers=headers,
+                    data={"file": (io.BytesIO(b""), "dump.sql"), "confirm": "RESTORE"},
+                    content_type="multipart/form-data",
+                )
+                self.assertEqual(empty.status_code, 400)
+                self.assertEqual(empty.json["code"], "file_empty")
+
+                self.assertEqual(len(calls), 0)
+
+                with backend.app.app_context():
+                    before = backend.AuditLog.query.filter_by(action="BACKUP_RESTORED").count()
+
+                restored = self.client.post(
+                    "/api/admin/backups/restore-upload",
+                    headers=headers,
+                    data={"file": (io.BytesIO(b"SELECT 1;\n"), "dump.sql"), "confirm": "RESTORE"},
+                    content_type="multipart/form-data",
+                )
+                self.assertEqual(restored.status_code, 200)
+                self.assertEqual(len(calls), 1)
+                self.assertIn("restore_db.sh", calls[0][0])
+                self.assertEqual(calls[0][-1], "--yes")
+                # The temporary upload file must be cleaned up.
+                self.assertFalse(os.path.exists(calls[0][1]))
+
+                with backend.app.app_context():
+                    self.assertEqual(
+                        backend.AuditLog.query.filter_by(action="BACKUP_RESTORED").count(),
+                        before + 1,
+                    )
+            finally:
+                backend.run_project_script = original_run
+                backend.BACKUP_DIR = original_dir
 
     def test_admin_generate_and_restore_backups(self):
         import types  # noqa: F401

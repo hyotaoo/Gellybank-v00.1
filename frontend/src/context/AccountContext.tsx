@@ -11,6 +11,7 @@ import type { ReactNode } from 'react';
 import { ApiError, setAuthToken } from '@/api/client';
 import { listAccounts } from '@/api/accounts';
 import type { Account } from '@/api/accounts';
+import usePolling from '@/hooks/usePolling';
 
 const SELECTED_ACCOUNT_KEY = 'gellybank.selectedAccountId';
 
@@ -35,12 +36,12 @@ export const AccountProvider = ({ children }: { children: ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
   const controllerRef = useRef<AbortController>();
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
 
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
 
     try {
@@ -68,6 +69,9 @@ export const AccountProvider = ({ children }: { children: ReactNode }) => {
     void refresh();
     return () => controllerRef.current?.abort();
   }, [refresh]);
+
+  // Keep balances and account data fresh without a manual reload.
+  usePolling(() => { void refresh(true); });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

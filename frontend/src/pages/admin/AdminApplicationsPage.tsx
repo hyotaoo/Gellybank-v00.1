@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '@/api/client';
 import { decideAccountApplication, listAccountApplications } from '@/api/admin';
 import type { AccountApplication } from '@/api/admin';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
 const AdminApplicationsPage = () => {
@@ -13,8 +14,8 @@ const AdminApplicationsPage = () => {
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
-  const refresh = async () => {
-    setLoading(true);
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setApplications(await listAccountApplications('pending'));
@@ -28,6 +29,9 @@ const AdminApplicationsPage = () => {
   useEffect(() => {
     void refresh();
   }, []);
+
+  // Keep the application list current without a manual reload.
+  usePolling(() => { void refresh(true); });
 
   const decide = async (application: AccountApplication, decision: 'approve' | 'reject', rejectionReason?: string) => {
     setBusyId(application.id);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError } from '@/api/client';
 import {
@@ -9,6 +9,7 @@ import {
 import type { AdminTransaction } from '@/api/admin';
 import Button from '@/components/common/Button';
 import Textarea from '@/components/common/Textarea';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency, formatDateTime as formatDateTimeValue } from '@/utils/format';
 
 const formatDateTime = (value: string | null) => (value ? formatDateTimeValue(value) : '—');
@@ -47,8 +48,8 @@ const AdminTransactionsPage = () => {
   const [reversing, setReversing] = useState(false);
   const [reason, setReason] = useState('');
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setTransactions(await listAdminTransactions({
@@ -64,12 +65,15 @@ const AdminTransactionsPage = () => {
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeFilter, statusFilter]);
+  };
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeFilter, statusFilter]);
+
+  // Keep the list current without a manual reload.
+  usePolling(() => { void refresh(true); });
 
   const openDetail = async (tx: Pick<AdminTransaction, 'id'>) => {
     setError(undefined);
@@ -217,7 +221,7 @@ const AdminTransactionsPage = () => {
                     <button
                       type="button"
                       onClick={() => void openDetail(tx)}
-                      className="font-medium text-primary hover:underline"
+                      className="font-medium text-primary text-left hover:underline"
                     >
                       <span className="block">{tx.customerName ?? '—'}</span>
                       <span className="text-xs text-muted">{tx.customerEmail}</span>

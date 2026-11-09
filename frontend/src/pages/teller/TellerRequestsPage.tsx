@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '@/api/client';
 import { approveTellerRequest, rejectTellerRequest, listTellerRequests } from '@/api/requests';
 import type { TellerRequest } from '@/api/requests';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
 const statusTone: Record<string, string> = {
@@ -29,8 +30,8 @@ const TellerRequestsPage = () => {
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
-  const refresh = async () => {
-    setLoading(true);
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setRequests(await listTellerRequests(filter));
@@ -45,6 +46,9 @@ const TellerRequestsPage = () => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
+
+  // Keep the queue current without a manual reload.
+  usePolling(() => { void refresh(true); });
 
   const approve = async (request: TellerRequest) => {
     setBusyId(request.id);

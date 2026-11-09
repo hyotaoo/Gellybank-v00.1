@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listMyRequests } from '@/api/requests';
 import type { TransactionRequest } from '@/api/requests';
+import usePolling from '@/hooks/usePolling';
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon';
 import { formatCurrency } from '@/utils/format';
 
@@ -41,6 +42,18 @@ const RequestsSummaryCard = () => {
 
     return () => controller.abort();
   }, []);
+
+  // Keep the summary current without a manual reload.
+  usePolling(() => {
+    listMyRequests()
+      .then((data) => {
+        setRequests(data);
+        setError(undefined);
+      })
+      .catch(() => {
+        // Keep showing the last known requests on a failed poll.
+      });
+  });
 
   return (
     <section className="flex h-[500px] flex-1 flex-col gap-6 overflow-hidden rounded-[36px] border border-surface-line bg-surface-soft p-8">

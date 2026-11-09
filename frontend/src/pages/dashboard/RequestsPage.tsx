@@ -4,6 +4,7 @@ import { cancelRequest, listMyRequests } from '@/api/requests';
 import type { RequestStatus, TransactionRequest } from '@/api/requests';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import Button from '@/components/common/Button';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
 const statusTone: Record<string, string> = {
@@ -37,8 +38,8 @@ const RequestsPage = () => {
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
-  const refresh = async () => {
-    setLoading(true);
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setRequests(await listMyRequests(filter));
@@ -53,6 +54,9 @@ const RequestsPage = () => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
+
+  // Keep the request list current without a manual reload.
+  usePolling(() => { void refresh(true); });
 
   const cancel = async (id: string) => {
     setBusyId(id);

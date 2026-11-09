@@ -136,3 +136,12 @@ Legend: [x] done · [~] partial · [ ] missing
 - [x] Database Backup
 - [x] Admin Profile – display name (screen-wide) + password change.
 - [x] Logout
+
+### ADMIN UI - final revisions
+- [X] Search function in admin is not working
+- [X] Larger button on generate and restore backup - both must come from the file management system of the admin, user can decide the file path before downloading.
+- [ ] warning form in system settings
+- [X] @frontend/ the customer column must be aligned left
+- [X] @frontend/ change buttons on Reports & analytics, Database backups, settings, and admin settings (must be similar to the button of the other pages)
+- [ ] implement a best-option searching algorithm
+- [ ] Record lookup using hashing

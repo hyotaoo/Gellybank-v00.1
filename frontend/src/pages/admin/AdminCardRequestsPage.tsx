@@ -6,6 +6,7 @@ import {
   rejectAdminCardRequest,
 } from '@/api/admin';
 import type { TellerRequest } from '@/api/requests';
+import usePolling from '@/hooks/usePolling';
 
 const AdminCardRequestsPage = () => {
   const [requests, setRequests] = useState<TellerRequest[]>([]);
@@ -16,8 +17,8 @@ const AdminCardRequestsPage = () => {
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
-  const refresh = async () => {
-    setLoading(true);
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setRequests(await listAdminCardRequests('pending'));
@@ -31,6 +32,9 @@ const AdminCardRequestsPage = () => {
   useEffect(() => {
     void refresh();
   }, []);
+
+  // Keep the request list current without a manual reload.
+  usePolling(() => { void refresh(true); });
 
   const approve = async (request: TellerRequest) => {
     setBusyId(request.id);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ApiError } from '@/api/client';
 import {
   getAdminAccount,
@@ -12,6 +12,7 @@ import type {
   AdminAccountTransaction,
 } from '@/api/admin';
 import Button from '@/components/common/Button';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
 const STATUSES = ['all', 'active', 'frozen', 'closed'] as const;
@@ -72,8 +73,8 @@ const AdminAccountsPage = () => {
   const [confirming, setConfirming] = useState<AdminAccountAction>();
   const [acting, setActing] = useState(false);
 
-  const refresh = useCallback(async (term = search) => {
-    setLoading(true);
+  const refresh = async (term: string, silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setAccounts(await listAdminAccounts({
@@ -85,10 +86,13 @@ const AdminAccountsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { void refresh(); }, [statusFilter]);
+  useEffect(() => { void refresh(search); }, [statusFilter]);
+
+  // Keep the account list current without a manual reload.
+  usePolling(() => { void refresh(search, true); });
 
   const openDetail = async (account: AdminAccount) => {
     setError(undefined);
@@ -160,8 +164,8 @@ const AdminAccountsPage = () => {
       <form
         className="flex gap-2"
         onSubmit={(event) => {
-          event.preventDefault(s);
-          void refresh();
+          event.preventDefault();
+          void refresh(search);
         }}
       >
         <input
@@ -215,7 +219,7 @@ const AdminAccountsPage = () => {
                     <button
                       type="button"
                       onClick={() => void openDetail(account)}
-                      className="font-medium text-primary hover:underline"
+                      className="font-medium text-primary text-left hover:underline"
                     >
                       <span className="block">{account.customerName || '—'}</span>
                       <span className="text-xs text-muted">{account.customerEmail}</span>

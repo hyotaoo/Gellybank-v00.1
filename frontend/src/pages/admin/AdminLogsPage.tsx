@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError } from '@/api/client';
 import { getSecuritySummary, listAuditLogs, listLoginHistory } from '@/api/admin';
+import usePolling from '@/hooks/usePolling';
 import type {
   AuditLogEntry,
   AuditLogFilters,
@@ -56,8 +57,8 @@ const AdminLogsPage = () => {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string>();
 
-  const loadLogs = useCallback(async () => {
-    setLogsLoading(true);
+  const loadLogs = async (silent = false) => {
+    if (!silent) setLogsLoading(true);
     setLogError(undefined);
     try {
       const filters: AuditLogFilters = {
@@ -72,7 +73,7 @@ const AdminLogsPage = () => {
     } finally {
       setLogsLoading(false);
     }
-  }, [severity, actorId, action, entityType]);
+  };
 
   const loadLogins = useCallback(async (email = loginEmail) => {
     setLoginsLoading(true);
@@ -106,7 +107,13 @@ const AdminLogsPage = () => {
 
   useEffect(() => {
     void loadLogs();
-  }, [loadLogs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [severity, actorId, action, entityType]);
+
+  // Keep the audit log current without a manual reload.
+  usePolling(() => {
+    if (tab === 'audit') void loadLogs(true);
+  });
 
   useEffect(() => {
     if (tab === 'logins' && logins.length === 0) void loadLogins();

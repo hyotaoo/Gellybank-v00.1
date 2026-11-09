@@ -98,3 +98,19 @@ export async function apiDownload(path: string): Promise<Blob> {
 
   return response.blob();
 }
+
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const token = getAuthToken(tokenScopeForPath(path));
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!response.ok) throw await errorFromResponse(response);
+
+  return (await response.json()) as T;
+}

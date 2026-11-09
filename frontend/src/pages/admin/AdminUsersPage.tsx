@@ -20,6 +20,7 @@ import Field from '@/components/common/Field';
 import Input from '@/components/common/Input';
 import PasswordField from '@/components/auth/PasswordField';
 import Select from '@/components/common/Select';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
 const ROLES: (AdminRole | 'all')[] = ['all', 'customer', 'teller', 'admin'];
@@ -48,8 +49,8 @@ const AdminUsersPage = () => {
   const [detail, setDetail] = useState<AdminUserDetail>();
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const refresh = async (term = search) => {
-    setLoading(true);
+  const refresh = async (term = search, silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setUsers(await listAdminUsers(term, {
@@ -64,9 +65,12 @@ const AdminUsersPage = () => {
   };
 
   useEffect(() => {
-    void refresh('');
+    void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roleFilter, statusFilter]);
+
+  // Keep the user list current without a manual reload.
+  usePolling(() => { void refresh(search, true); });
 
   const changeUser = async (user: AdminUser, update: { role?: AdminRole; isActive?: boolean }) => {
     setBusyId(user.id);

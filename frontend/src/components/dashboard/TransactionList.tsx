@@ -8,6 +8,7 @@ import HistoryIcon from '@/components/icons/HistoryIcon';
 import TransferIcon from '@/components/icons/TransferIcon';
 import WithdrawIcon from '@/components/icons/WithdrawIcon';
 import { useAccounts } from '@/context/AccountContext';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency, formatDateTime } from '@/utils/format';
 
 interface TransactionListProps {
@@ -65,6 +66,20 @@ const TransactionList = ({ accountId, currency, limit, className = '' }: Transac
 
     return () => controller.abort();
   }, [accountId, limit]);
+
+  // Keep the list current without a manual reload; silent loads skip the
+  // loading state so the existing rows stay visible.
+  usePolling(() => {
+    if (!accountId) return;
+    const controller = new AbortController();
+    listTransactions({ accountId, limit }, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setTransactions(data);
+      })
+      .catch(() => {
+        // Keep showing the last known transactions on a failed poll.
+      });
+  });
 
   if (loading) {
     return (

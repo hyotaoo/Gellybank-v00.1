@@ -137,7 +137,11 @@ const AdminProfilePage = () => {
             </Field>
             {nameMessage && <p role="status" className="text-sm text-green-700">{nameMessage}</p>}
             <div className="flex justify-end">
-              <Button type="submit" disabled={savingName}>
+              <Button
+                type="submit"
+                disabled={savingName}
+                className="h-[44px] px-5 text-[14px] font-semibold"
+              >
                 {savingName ? 'Saving…' : 'Save display name'}
               </Button>
             </div>
@@ -196,7 +200,11 @@ const AdminProfilePage = () => {
               <p role="status" className="text-sm text-green-700">{passwordMessage}</p>
             )}
             <div className="flex justify-end">
-              <Button type="submit" disabled={savingPassword}>
+              <Button
+                type="submit"
+                disabled={savingPassword}
+                className="h-[44px] px-5 text-[14px] font-semibold"
+              >
                 {savingPassword ? 'Updating…' : 'Update password'}
               </Button>
             </div>

@@ -2,12 +2,16 @@ import { useEffect, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { ApiError } from '@/api/client';
 import { getAdminSettings, updateAdminSettings } from '@/api/admin';
+import type { BankSettings } from '@/api/admin';
 import Button from '@/components/common/Button';
 import Field from '@/components/common/Field';
 import Input from '@/components/common/Input';
 import Textarea from '@/components/common/Textarea';
 
 const MAX_LOGO_BYTES = 1_048_576;
+
+const overlay = 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4';
+const modal = 'w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl';
 
 const readLogoFile = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -16,6 +20,22 @@ const readLogoFile = (file: File): Promise<string> =>
     reader.onerror = () => reject(new Error('Unable to read the image file.'));
     reader.readAsDataURL(file);
   });
+
+const FIELD_LABELS: Record<string, string> = {
+  bankName: 'Bank name',
+  contactEmail: 'Contact email',
+  contactPhone: 'Contact phone',
+  address: 'Address',
+  logo: 'Bank logo',
+  maintenanceMode: 'Maintenance mode',
+};
+
+const describeValue = (key: string, value: unknown): string => {
+  if (key === 'logo') return value ? 'New image' : 'Removed';
+  if (key === 'maintenanceMode') return value ? 'On' : 'Off';
+  if (value === '' || value === null || value === undefined) return '(empty)';
+  return String(value);
+};
 
 const AdminSettingsPage = () => {
   const [form, setForm] = useState({
@@ -32,19 +52,47 @@ const AdminSettingsPage = () => {
   const [error, setError] = useState<string>();
   const [savedMessage, setSavedMessage] = useState<string>();
 
+  // Last saved snapshot, used to warn about (and show) pending changes.
+  const [saved, setSaved] = useState<Record<string, unknown>>({});
+  const [pendingSave, setPendingSave] = useState<{
+    patch: Record<string, unknown>;
+    message: string;
+  }>();
+
+  const applyLoaded = (data: BankSettings) => {
+    setForm({
+      bankName: data.bankName,
+      contactEmail: data.contactEmail ?? '',
+      contactPhone: data.contactPhone ?? '',
+      address: data.address ?? '',
+    });
+    setLogo(data.logo);
+    setMaintenanceMode(data.maintenanceMode);
+    setSaved({
+      bankName: data.bankName,
+      contactEmail: data.contactEmail ?? '',
+      contactPhone: data.contactPhone ?? '',
+      address: data.address ?? '',
+      logo: data.logo,
+      maintenanceMode: data.maintenanceMode,
+    });
+  };
+
+  const changesFor = (patch: Record<string, unknown>) =>
+    Object.entries(patch)
+      .filter(([key, value]) => (value ?? null) !== (saved[key] ?? null))
+      .map(([key, value]) => ({
+        label: FIELD_LABELS[key] ?? key,
+        from: describeValue(key, saved[key]),
+        to: describeValue(key, value),
+      }));
+
   useEffect(() => {
     let cancelled = false;
     getAdminSettings()
       .then((data) => {
         if (cancelled) return;
-        setForm({
-          bankName: data.bankName,
-          contactEmail: data.contactEmail ?? '',
-          contactPhone: data.contactPhone ?? '',
-          address: data.address ?? '',
-        });
-        setLogo(data.logo);
-        setMaintenanceMode(data.maintenanceMode);
+        applyLoaded(data);
       })
       .catch((err) =>
         setError(err instanceof ApiError ? err.message : 'Unable to load settings.'),
@@ -55,6 +103,7 @@ const AdminSettingsPage = () => {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const persist = async (patch: Record<string, unknown>, message: string) => {
@@ -63,14 +112,7 @@ const AdminSettingsPage = () => {
     setSavedMessage(undefined);
     try {
       const data = await updateAdminSettings(patch);
-      setForm({
-        bankName: data.bankName,
-        contactEmail: data.contactEmail ?? '',
-        contactPhone: data.contactPhone ?? '',
-        address: data.address ?? '',
-      });
-      setLogo(data.logo);
-      setMaintenanceMode(data.maintenanceMode);
+      applyLoaded(data);
       setSavedMessage(message);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to save settings.');
@@ -79,8 +121,24 @@ const AdminSettingsPage = () => {
     }
   };
 
+  // Shows the confirmation form before anything is actually saved.
+  const requestSave = (patch: Record<string, unknown>, message: string) => {
+    if (changesFor(patch).length === 0) {
+      setSavedMessage('No changes to save.');
+      return;
+    }
+    setPendingSave({ patch, message });
+  };
+
+  const confirmPendingSave = async () => {
+    if (!pendingSave) return;
+    const { patch, message } = pendingSave;
+    setPendingSave(undefined);
+    await persist(patch, message);
+  };
+
   const handleSave = () => {
-    void persist({ ...form }, 'Settings saved.');
+    requestSave({ ...form }, 'Settings saved.');
   };
 
   const handleLogoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -96,7 +154,7 @@ const AdminSettingsPage = () => {
       setError('Unable to read the image file.');
       return;
     }
-    await persist({ logo: dataUrl }, 'Logo updated.');
+    requestSave({ logo: dataUrl }, 'Logo updated.');
   };
 
   const handleMaintenanceToggle = () => {
@@ -170,7 +228,11 @@ const AdminSettingsPage = () => {
               />
             </Field>
             <div className="flex justify-end">
-              <Button type="submit" disabled={saving}>
+              <Button
+                type="submit"
+                disabled={saving}
+                className="h-[44px] px-5 text-[14px] font-semibold"
+              >
                 {saving ? 'Saving…' : 'Save changes'}
               </Button>
             </div>
@@ -205,7 +267,7 @@ const AdminSettingsPage = () => {
                 {logo && (
                   <button
                     type="button"
-                    onClick={() => void persist({ logo: null }, 'Logo removed.')}
+                    onClick={() => requestSave({ logo: null }, 'Logo removed.')}
                     disabled={saving}
                     className="text-left text-sm text-red-700 hover:underline disabled:opacity-60"
                   >
@@ -231,12 +293,17 @@ const AdminSettingsPage = () => {
                 <div className="mt-3 flex gap-3">
                   <Button
                     variant="primary"
+                    className="h-[44px] px-5 text-[14px] font-semibold"
                     onClick={confirmMaintenance}
                     disabled={saving}
                   >
                     Yes, turn it on
                   </Button>
-                  <Button variant="secondary" onClick={() => setConfirmingMaintenance(false)}>
+                  <Button
+                    variant="secondary"
+                    className="h-[44px] px-5 text-[14px] font-semibold"
+                    onClick={() => setConfirmingMaintenance(false)}
+                  >
                     Cancel
                   </Button>
                 </div>
@@ -246,7 +313,12 @@ const AdminSettingsPage = () => {
                 <span className="text-sm text-muted">
                   Status: {maintenanceMode ? 'On' : 'Off'}
                 </span>
-                <Button variant="secondary" onClick={handleMaintenanceToggle} disabled={saving}>
+                <Button
+                  variant="secondary"
+                  className="h-[44px] px-5 text-[14px] font-semibold"
+                  onClick={handleMaintenanceToggle}
+                  disabled={saving}
+                >
                   {maintenanceMode ? 'Turn off' : 'Turn on'}
                 </Button>
               </div>
@@ -254,6 +326,54 @@ const AdminSettingsPage = () => {
           </div>
         </div>
       </div>
+
+      {pendingSave && (
+        <div className={overlay}>
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="save-changes-title"
+            className={modal}
+          >
+            <h2 id="save-changes-title" className="text-xl font-semibold text-ink">
+              Save changes?
+            </h2>
+            <p className="mt-2 text-sm text-muted">
+              These settings apply site-wide. The following will change:
+            </p>
+            <ul className="mt-3 flex flex-col gap-2 rounded-xl border border-surface-line bg-surface-soft p-4 text-sm">
+              {changesFor(pendingSave.patch).map((change) => (
+                <li key={change.label}>
+                  <span className="font-semibold text-ink">{change.label}</span>:{' '}
+                  <span className="text-muted line-through">{change.from}</span> →{' '}
+                  <span className="font-medium">{change.to}</span>
+                </li>
+              ))}
+            </ul>
+            {pendingSave.message === 'Logo updated.' && (
+              <p className="mt-3 text-sm text-muted">
+                The logo appears on every sign-in screen and dashboard.
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-3">
+              <Button
+                variant="secondary"
+                className="h-[44px] px-5 text-[14px] font-semibold"
+                onClick={() => setPendingSave(undefined)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="h-[44px] px-5 text-[14px] font-semibold"
+                disabled={saving}
+                onClick={() => void confirmPendingSave()}
+              >
+                {saving ? 'Saving…' : 'Confirm save'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };

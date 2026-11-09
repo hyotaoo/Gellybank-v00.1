@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import secrets
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -1636,6 +1637,75 @@ def admin_restore_backup():
     )
     db.session.commit()
     return jsonify({"message": f"Database restored from {filename}."})
+
+
+BACKUP_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+
+@app.post("/api/admin/backups/restore-upload")
+@admin_required
+def admin_restore_backup_upload():
+    """Restores a .sql dump uploaded by the admin from their own computer.
+    Requires explicit typed confirmation because the database is overwritten."""
+    uploaded = request.files.get("file")
+    confirmation = str(request.form.get("confirm") or "").strip()
+
+    if confirmation != "RESTORE":
+        return error(
+            "Type RESTORE to confirm overwriting the database.",
+            400,
+            "confirmation_invalid",
+        )
+    if uploaded is None or not uploaded.filename:
+        return error("Choose a .sql backup file to restore.", 400, "file_missing")
+
+    raw_name = uploaded.filename
+    if Path(raw_name).name != raw_name or not raw_name.endswith(".sql"):
+        return error("The file must be a .sql backup.", 400, "file_invalid")
+    original_name = Path(raw_name).name
+
+    if not RESTORE_SCRIPT.is_file():
+        return error("The restore script is not available.", 503, "script_missing")
+
+    temp_path = Path(tempfile.gettempdir()) / f"gellybank_upload_{uuid4().hex}.sql"
+    bytes_written = 0
+    try:
+        with temp_path.open("wb") as sink:
+            while chunk := uploaded.stream.read(1024 * 1024):
+                bytes_written += len(chunk)
+                if bytes_written > BACKUP_UPLOAD_MAX_BYTES:
+                    return error(
+                        "The backup file is too large (50 MB max).",
+                        413,
+                        "file_too_large",
+                    )
+                sink.write(chunk)
+        if bytes_written == 0:
+            return error("The uploaded file is empty.", 400, "file_empty")
+
+        try:
+            result = run_project_script(RESTORE_SCRIPT, temp_path, "--yes")
+        except subprocess.TimeoutExpired:
+            return error("The restore timed out.", 503, "restore_timeout")
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip().splitlines()
+            return error(detail[-1] if detail else "Restore failed.", 503, "restore_failed")
+
+        # Sessions may hold pre-restore data; drop cached state.
+        db.session.remove()
+
+        actor = authenticated_user()
+        log_audit(
+            "BACKUP_RESTORED",
+            "BACKUP",
+            actor_user_id=actor.user_id,
+            severity="WARN",
+            details={"file": original_name, "source": "upload"},
+        )
+        db.session.commit()
+        return jsonify({"message": f"Database restored from {original_name}."})
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def account_with_owner(account):

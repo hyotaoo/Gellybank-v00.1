@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '@/api/client';
 import { listTellerRequests } from '@/api/requests';
 import type { TellerRequest } from '@/api/requests';
+import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 import DepositIcon from '@/components/icons/DepositIcon';
 import ProfileIcon from '@/components/icons/ProfileIcon';
@@ -26,8 +27,8 @@ const TellerDashboardPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
 
-  const refresh = async () => {
-    setLoading(true);
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     try {
       setRequests(await listTellerRequests('all'));
@@ -41,6 +42,9 @@ const TellerDashboardPage = () => {
   useEffect(() => {
     void refresh();
   }, []);
+
+  // Keep the queue and daily totals current without a manual reload.
+  usePolling(() => { void refresh(true); });
 
   const pending = requests.filter((request) => request.status === 'pending');
   const todayStr = new Date().toDateString();
