@@ -90,6 +90,7 @@ const ReceiptModal = ({ transaction, account, onClose }: ReceiptModalProps) => {
           contentClassName="p-6 sm:p-8"
           trackInsetTop={16}
           trackInsetBottom={16}
+          hideRail
         >
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">

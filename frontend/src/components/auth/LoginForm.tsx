@@ -52,7 +52,7 @@ const LoginForm = () => {
         }
       }}
     >
-      <h2 className="text-[24px] font-bold leading-[1.21] text-ink">Login</h2>
+      <h2 className="text-center text-[24px] font-bold leading-[1.21] text-ink">Login</h2>
 
       {registered && (
         <p

@@ -13,6 +13,7 @@ interface ScrollAreaProps {
   thumbHeight?: number;
   trackInsetTop?: number;
   trackInsetBottom?: number;
+  hideRail?: boolean;
   children: ReactNode;
 }
 
@@ -24,6 +25,7 @@ const ScrollArea = ({
   thumbHeight = THUMB_HEIGHT,
   trackInsetTop = TRACK_INSET_TOP,
   trackInsetBottom = TRACK_INSET_BOTTOM,
+  hideRail = false,
   children,
 }: ScrollAreaProps) => {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -96,7 +98,7 @@ const ScrollArea = ({
         </div>
       </div>
 
-      {rail.visible && (
+      {!hideRail && rail.visible && (
         <div
           aria-hidden="true"
           className={`pointer-events-none absolute w-2 ${railClassName}`}

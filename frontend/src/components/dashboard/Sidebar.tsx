@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import DepositIcon from '@/components/icons/DepositIcon';
 import HistoryIcon from '@/components/icons/HistoryIcon';
 import HomeIcon from '@/components/icons/HomeIcon';
+import PaperIcon from '@/components/icons/PaperIcon';
 import LogOutIcon from '@/components/icons/LogOutIcon';
 import ProfileIcon from '@/components/icons/ProfileIcon';
 import TransferIcon from '@/components/icons/TransferIcon';
@@ -17,7 +18,7 @@ const navItems = [
   { label: 'Deposit', to: '/dashboard/deposit', icon: <DepositIcon className="h-6 w-6" /> },
   { label: 'Withdraw', to: '/dashboard/withdraw', icon: <WithdrawIcon className="h-6 w-6" /> },
   { label: 'Transfer', to: '/dashboard/transfer', icon: <TransferIcon className="h-6 w-6" /> },
-  { label: 'Requests', to: '/dashboard/requests', icon: <HistoryIcon className="h-6 w-6" /> },
+  { label: 'Requests', to: '/dashboard/requests', icon: <PaperIcon className="h-6 w-6" /> },
   { label: 'History', to: '/dashboard/history', icon: <HistoryIcon className="h-6 w-6" /> },
   { label: 'Profile', to: '/dashboard/profile', icon: <ProfileIcon className="h-6 w-6" /> },
 ];
