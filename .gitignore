@@ -17,3 +17,7 @@ backups/
 # Node / frontend build output
 frontend/node_modules/
 frontend/dist/
+
+# Local tooling config
+opencode.json
+pyrightconfig.json

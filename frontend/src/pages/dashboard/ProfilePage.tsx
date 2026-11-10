@@ -9,6 +9,7 @@ import { getProfile, updateProfile } from '@/api/profile';
 import type { Profile } from '@/api/profile';
 import { createRequest } from '@/api/requests';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import ScrollArea from '@/components/common/ScrollArea';
 import Button from '@/components/common/Button';
 import CustomerAvatar from '@/components/common/CustomerAvatar';
 import AvatarCropModal from '@/components/common/AvatarCropModal';
@@ -302,7 +303,13 @@ const ProfilePage = () => {
 
   return (
     <DashboardLayout title="Profile">
-      <div className="flex flex-1 flex-col gap-6 pb-2 lg:overflow-y-auto lg:pr-1">
+      <ScrollArea
+        className="lg:pr-1"
+        wrapperClassName="flex min-h-0 flex-1 flex-col"
+        contentClassName="flex flex-col gap-6 pb-2"
+        trackInsetTop={0}
+        trackInsetBottom={8}
+      >
         <p className="text-sm text-muted"></p>
 
         {error && <p role="alert" className="text-[13px] leading-[1.21] text-red-600">{error}</p>}
@@ -604,7 +611,7 @@ const ProfilePage = () => {
           </div>
           </>
         ) : null}
-      </div>
+      </ScrollArea>
 
       {cropFile && (
         <AvatarCropModal

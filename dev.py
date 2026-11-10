@@ -125,7 +125,9 @@ required_tables = {
 }
 admin_schema_ready = (
     required_tables.issubset(tables)
+    and "bank_settings" in tables
     and "auth_token_version" in user_columns
+    and "display_name" in user_columns
     and "email_verified_at" in user_columns
     and "severity" in audit_columns
     and "status" in transaction_columns
@@ -760,6 +762,31 @@ def _migration_statement_exists(cursor, statement: str) -> bool:
             (create_index.group(2), create_index.group(1)),
         )
         return cursor.fetchone() is not None
+
+    # ENUM changes are only needed when the current type is missing a value.
+    # Skipping supersets keeps re-runs from narrowing an enum (006 would drop
+    # CARD_LOST) or failing on rows that already use the newer value.
+    modify_enum = re.match(
+        r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+MODIFY\s+(?:COLUMN\s+)?`?(\w+)`?\s+"
+        r"ENUM\s*\((.*?)\)",
+        statement,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if modify_enum:
+        table, column, values = modify_enum.groups()
+        wanted = {
+            value.strip().strip("'\"").upper() for value in values.split(",")
+        }
+        cursor.execute(
+            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            (table, column),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return False
+        current = {value.upper() for value in re.findall(r"'([^']*)'", row[0])}
+        return wanted.issubset(current)
     return False
 
 
@@ -1154,6 +1181,9 @@ def setup_database(update_credentials: bool = True) -> bool:
     if database_check_code() == 5:
         apply_schema_migrations()
     if database_ready():
+        if not apply_schema_migrations():
+            print("Database is ready, but the schema could not be reconciled.")
+            return False
         print("Database is ready.")
         return True
 
@@ -1191,8 +1221,9 @@ def setup_database(update_credentials: bool = True) -> bool:
     if code != DB_SETUP_OK:
         print("Database setup failed. See the messages above.")
         return False
-    if database_check_code() == 5:
-        apply_schema_migrations()
+    if not apply_schema_migrations():
+        print("Database setup finished, but the schema could not be reconciled.")
+        return False
     return database_ready()
 
 
@@ -1338,6 +1369,9 @@ def wait_for(
 
 
 def start_all() -> bool:
+    if database_ready() and not apply_schema_migrations():
+        log_line("Could not reconcile the database schema; not starting.")
+        return False
     if PROCESSES.get("backend") is None or PROCESSES["backend"].poll() is not None:
         proc = start_backend()
         if proc is not None:
@@ -1400,12 +1434,11 @@ def do_setup() -> bool:
             return False
         write_frontend_env()
     database_check = database_check_code()
-    if database_check == 5:
-        if not apply_schema_migrations():
-            return False
-    elif database_check != 0:
+    if database_check not in (0, 5):
         if not setup_database(update_credentials=False):
             return False
+    elif not apply_schema_migrations():
+        return False
     if not database_ready():
         log_line("Database setup finished, but the required schema is still not ready.")
         return False

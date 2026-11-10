@@ -4,6 +4,7 @@ import { listMyRequests } from '@/api/requests';
 import type { TransactionRequest } from '@/api/requests';
 import usePolling from '@/hooks/usePolling';
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon';
+import ScrollArea from '@/components/common/ScrollArea';
 import { formatCurrency } from '@/utils/format';
 
 const statusTone: Record<string, string> = {
@@ -80,7 +81,12 @@ const RequestsSummaryCard = () => {
           No requests yet. Submit a deposit or withdrawal request to see it here.
         </p>
       ) : (
-        <ul className="flex flex-col gap-3 overflow-y-auto">
+        <ScrollArea
+          wrapperClassName="flex min-h-0 flex-1 flex-col"
+          trackInsetTop={0}
+          trackInsetBottom={0}
+        >
+          <ul className="flex flex-col gap-3">
           {requests.slice(0, 5).map((request) => (
             <li
               key={request.id}
@@ -112,6 +118,7 @@ const RequestsSummaryCard = () => {
             </li>
           ))}
         </ul>
+        </ScrollArea>
       )}
     </section>
   );

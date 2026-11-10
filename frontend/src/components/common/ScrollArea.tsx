@@ -7,11 +7,25 @@ const TRACK_INSET_BOTTOM = 91;
 
 interface ScrollAreaProps {
   className?: string;
+  wrapperClassName?: string;
+  contentClassName?: string;
   railClassName?: string;
+  thumbHeight?: number;
+  trackInsetTop?: number;
+  trackInsetBottom?: number;
   children: ReactNode;
 }
 
-const ScrollArea = ({ className = '', railClassName = 'right-2', children }: ScrollAreaProps) => {
+const ScrollArea = ({
+  className = '',
+  wrapperClassName = '',
+  contentClassName = '',
+  railClassName = 'right-2',
+  thumbHeight = THUMB_HEIGHT,
+  trackInsetTop = TRACK_INSET_TOP,
+  trackInsetBottom = TRACK_INSET_BOTTOM,
+  children,
+}: ScrollAreaProps) => {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
@@ -21,13 +35,13 @@ const ScrollArea = ({ className = '', railClassName = 'right-2', children }: Scr
     const viewport = viewportRef.current;
     if (!viewport) return;
     const maxScroll = viewport.scrollHeight - viewport.clientHeight;
-    const travel = viewport.clientHeight - TRACK_INSET_TOP - TRACK_INSET_BOTTOM - THUMB_HEIGHT;
+    const travel = viewport.clientHeight - trackInsetTop - trackInsetBottom - thumbHeight;
     if (maxScroll <= 0 || travel <= 0) {
       setRail({ visible: false, thumbTop: 0 });
       return;
     }
     setRail({ visible: true, thumbTop: (viewport.scrollTop / maxScroll) * travel });
-  }, []);
+  }, [thumbHeight, trackInsetTop, trackInsetBottom]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -58,7 +72,7 @@ const ScrollArea = ({ className = '', railClassName = 'right-2', children }: Scr
     const drag = dragRef.current;
     if (!viewport || !drag || drag.pointerId !== event.pointerId) return;
 
-    const travel = viewport.clientHeight - TRACK_INSET_TOP - TRACK_INSET_BOTTOM - THUMB_HEIGHT;
+    const travel = viewport.clientHeight - trackInsetTop - trackInsetBottom - thumbHeight;
     const maxScroll = viewport.scrollHeight - viewport.clientHeight;
     if (travel <= 0 || maxScroll <= 0) return;
 
@@ -71,21 +85,27 @@ const ScrollArea = ({ className = '', railClassName = 'right-2', children }: Scr
   };
 
   return (
-    <div className="relative w-full">
-      <div ref={viewportRef} onScroll={sync} className={`scrollbar-none overflow-y-auto ${className}`}>
-        <div ref={contentRef}>{children}</div>
+    <div className={`relative w-full ${wrapperClassName}`}>
+      <div
+        ref={viewportRef}
+        onScroll={sync}
+        className={`scrollbar-none h-full overflow-y-auto ${className}`}
+      >
+        <div ref={contentRef} className={contentClassName}>
+          {children}
+        </div>
       </div>
 
       {rail.visible && (
         <div
           aria-hidden="true"
           className={`pointer-events-none absolute w-2 ${railClassName}`}
-          style={{ top: TRACK_INSET_TOP, bottom: TRACK_INSET_BOTTOM }}
+          style={{ top: trackInsetTop, bottom: trackInsetBottom }}
         >
           <div
             className="pointer-events-auto absolute inset-x-0 rounded-full bg-primary"
             style={{
-              height: THUMB_HEIGHT,
+              height: thumbHeight,
               transform: `translateY(${rail.thumbTop}px)`,
               touchAction: 'none',
             }}

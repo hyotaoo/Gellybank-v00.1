@@ -7,6 +7,7 @@ import {
   markNotificationRead,
 } from '@/api/notifications';
 import type { NotificationItem } from '@/api/notifications';
+import ScrollArea from '@/components/common/ScrollArea';
 import BellIcon from '@/components/icons/BellIcon';
 import { formatDateTime } from '@/utils/format';
 
@@ -141,7 +142,7 @@ const NotificationsDropdown = () => {
             )}
           </div>
 
-          <div className="max-h-[360px] overflow-y-auto">
+          <ScrollArea className="max-h-[360px]" trackInsetTop={0} trackInsetBottom={0}>
             {loading && items.length === 0 ? (
               <p role="status" className="px-4 py-8 text-center text-[13px] leading-[1.21] text-muted">
                 Loading notifications…
@@ -196,7 +197,7 @@ const NotificationsDropdown = () => {
                 ))}
               </ul>
             )}
-          </div>
+          </ScrollArea>
         </div>
       )}
     </div>

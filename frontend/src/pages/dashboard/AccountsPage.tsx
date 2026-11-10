@@ -3,6 +3,7 @@ import { ApiError } from '@/api/client';
 import { closeAccount, updateAccount } from '@/api/accounts';
 import type { Account } from '@/api/accounts';
 import AccountCard from '@/components/dashboard/AccountCard';
+import ScrollArea from '@/components/common/ScrollArea';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import OpenAccountForm from '@/components/dashboard/OpenAccountForm';
 import { useAccounts } from '@/context/AccountContext';
@@ -43,7 +44,13 @@ const AccountsPage = () => {
 
   return (
     <DashboardLayout title="Accounts">
-      <div className="flex flex-1 flex-col gap-6 pb-2 lg:overflow-y-auto lg:pr-1">
+      <ScrollArea
+        className="lg:pr-1"
+        wrapperClassName="flex min-h-0 flex-1 flex-col"
+        contentClassName="flex flex-col gap-6 pb-2"
+        trackInsetTop={0}
+        trackInsetBottom={8}
+      >
         <OpenAccountForm />
 
         {message && (
@@ -69,7 +76,7 @@ const AccountsPage = () => {
             ))}
           </div>
         )}
-      </div>
+      </ScrollArea>
     </DashboardLayout>
   );
 };

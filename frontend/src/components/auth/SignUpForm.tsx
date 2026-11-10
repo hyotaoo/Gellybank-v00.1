@@ -423,16 +423,6 @@ const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) =>
             />
           </Field>
 
-          <label className="flex items-center gap-2 text-[14px] font-medium leading-[1.21] text-ink">
-            <input
-              type="checkbox"
-              checked={values.mailingSameAsResidential}
-              onChange={(event) => update('mailingSameAsResidential', event.target.checked)}
-              className="h-4 w-4 shrink-0 accent-primary"
-            />
-            <span>Mailing Address Same as Residential?</span>
-          </label>
-
           <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
             <Field label="Email address" error={errors.email}>
               <Input

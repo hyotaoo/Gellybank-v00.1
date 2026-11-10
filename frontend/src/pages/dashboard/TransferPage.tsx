@@ -8,6 +8,7 @@ import type { Beneficiary } from '@/api/beneficiaries';
 import AccountSelect from '@/components/dashboard/AccountSelect';
 import AmountField from '@/components/dashboard/AmountField';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import ScrollArea from '@/components/common/ScrollArea';
 import ReceiptModal from '@/components/dashboard/ReceiptModal';
 import Select from '@/components/common/Select';
 import Input from '@/components/common/Input';
@@ -126,8 +127,14 @@ const TransferPage = () => {
       <div className="flex flex-1 flex-col gap-6 pb-2 lg:flex-row lg:overflow-hidden">
         <form
           onSubmit={handleSubmit}
-          className="flex flex-1 flex-col gap-5 rounded-[28px] border border-surface-line bg-surface-soft p-5 sm:p-8 lg:overflow-y-auto"
+          className="flex flex-1 flex-col rounded-[28px] border border-surface-line bg-surface-soft lg:min-h-0"
         >
+          <ScrollArea
+            wrapperClassName="flex min-h-0 flex-1 flex-col"
+            contentClassName="flex flex-col gap-5 p-5 sm:p-8"
+            trackInsetTop={16}
+            trackInsetBottom={16}
+          >
           <AccountSelect
             label="From account"
             accounts={accounts}
@@ -244,6 +251,7 @@ const TransferPage = () => {
               </span>
             )}
           </div>
+          </ScrollArea>
         </form>
 
         <aside className="flex w-full flex-none flex-col gap-5 rounded-[28px] bg-[rgba(248,231,185,0.32)] p-5 sm:p-8 lg:w-[350px]">

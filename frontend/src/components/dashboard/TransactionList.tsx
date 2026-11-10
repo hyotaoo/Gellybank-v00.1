@@ -3,6 +3,7 @@ import { ApiError } from '@/api/client';
 import { listTransactions } from '@/api/transactions';
 import type { Transaction } from '@/api/transactions';
 import ReceiptModal from '@/components/dashboard/ReceiptModal';
+import ScrollArea from '@/components/common/ScrollArea';
 import DepositIcon from '@/components/icons/DepositIcon';
 import HistoryIcon from '@/components/icons/HistoryIcon';
 import TransferIcon from '@/components/icons/TransferIcon';
@@ -122,7 +123,13 @@ const TransactionList = ({ accountId, currency, limit, className = '' }: Transac
 
   return (
     <>
-      <ul className={`flex flex-col gap-3 overflow-y-auto pr-1 ${className}`}>
+      <ScrollArea
+        wrapperClassName={`flex min-h-0 flex-1 flex-col ${className}`}
+        contentClassName="pr-1"
+        trackInsetTop={0}
+        trackInsetBottom={0}
+      >
+        <ul className="flex flex-col gap-3">
         {transactions.map((transaction) => (
           <li key={transaction.id}>
             <button
@@ -159,6 +166,7 @@ const TransactionList = ({ accountId, currency, limit, className = '' }: Transac
           </li>
         ))}
       </ul>
+      </ScrollArea>
       {receipt && (
         <ReceiptModal
           transaction={receipt}
