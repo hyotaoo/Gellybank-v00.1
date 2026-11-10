@@ -11,7 +11,6 @@ Only requires Python to be pre-installed.
 from __future__ import annotations
 
 import argparse
-import getpass
 import importlib
 import json
 import os
@@ -49,13 +48,14 @@ DROP_AI_INSIGHTS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "009_drop_ai_i
 CARD_LOST_MIGRATION_FILE = BACKEND / "db" / "migrations" / "010_card_lost_requests.sql"
 CUSTOMER_AVATAR_MIGRATION_FILE = BACKEND / "db" / "migrations" / "011_customer_avatar.sql"
 ADMIN_MANAGEMENT_MIGRATION_FILE = BACKEND / "db" / "migrations" / "012_admin_management.sql"
+CUSTOMER_PROFILE_MIGRATION_FILE = BACKEND / "db" / "migrations" / "013_customer_profile_details.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 BACKUP_SCRIPT = ROOT / "scripts" / "backup_db.sh"
 RESTORE_SCRIPT = ROOT / "scripts" / "restore_db.sh"
 BACKUP_DIR = ROOT / "backups"
 
 DB_NAME = os.environ.get("GELLYBANK_DB_NAME", "gellybank_db")
-DB_USER = os.environ.get("GELLYBANK_DB_USER", "gellyca")
+DB_USER = os.environ.get("GELLYBANK_DB_USER", "root")
 DB_HOST = os.environ.get("GELLYBANK_DB_HOST", "127.0.0.1")
 DB_PORT = int(os.environ.get("GELLYBANK_DB_PORT", "3306"))
 DB_ADMIN_USER = os.environ.get("GELLYBANK_DB_ADMIN_USER", "root")
@@ -64,7 +64,16 @@ BACKEND_PORT = int(os.environ.get("GELLYBANK_BACKEND_PORT", "5000"))
 FRONTEND_PORT = int(os.environ.get("GELLYBANK_FRONTEND_PORT", "5173"))
 
 REQUIRED_MODULES = ("flask", "flask_cors", "flask_sqlalchemy", "pymysql", "dotenv")
-PASSWORD_PATTERN = re.compile(r"^[A-Za-z0-9._~!#%+=,-]{8,64}$")
+PASSWORD_PATTERN = re.compile(r"[^\r\n]{8,128}")
+PASSWORD_HINT = "Use 8-128 characters on a single line"
+
+DB_SETUP_OK = 0
+DB_SETUP_FAILED = 1
+DB_SETUP_NEEDS_ADMIN = 3
+DB_SETUP_MISSING_PACKAGE = 4
+
+# MySQL errors that mean "the database or the account has to be created".
+ADMIN_ERROR_CODES = (1044, 1045, 1049, 1142, 1698)
 
 PROCESSES: dict[str, subprocess.Popen] = {}
 LOG_LOCK = threading.Lock()
@@ -102,6 +111,8 @@ try:
     transaction_columns = {row[0] for row in cursor.fetchall()}
     cursor.execute("SHOW COLUMNS FROM account_applications")
     application_columns = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SHOW COLUMNS FROM customers")
+    customer_columns = {row[0] for row in cursor.fetchall()}
 except Exception:
     connection.close()
     sys.exit(5)
@@ -119,6 +130,9 @@ admin_schema_ready = (
     and "severity" in audit_columns
     and "status" in transaction_columns
     and "created_account_id" in application_columns
+    and "city" in customer_columns
+    and "annual_gross_income" in customer_columns
+    and "account_ownership_type" in customer_columns
 )
 sys.exit(0 if admin_schema_ready else 5)
 """
@@ -289,20 +303,24 @@ def database_check_code() -> int:
 
 
 def valid_app_password(password: str) -> bool:
-    return bool(PASSWORD_PATTERN.match(password))
+    return bool(PASSWORD_PATTERN.fullmatch(password))
 
 
 def generate_app_password() -> str:
     return secrets.token_urlsafe(15)
 
 
-def write_env(app_password: str) -> bool:
-    secret_key = secrets.token_urlsafe(48)
+def write_env(app_password: str, user: str | None = None) -> bool:
+    account = user or DB_USER
+    existing = read_env_file()
+    secret_key = existing.get("SECRET_KEY", "")
+    if not secret_key or "change-this" in secret_key:
+        secret_key = secrets.token_urlsafe(48)
     encoded_password = quote(app_password, safe="")
-    url = f"mysql+pymysql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    url = f"mysql+pymysql://{account}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     content = (
         "# Written by dev.py.\n"
-        f"# The MySQL account '{DB_USER}' only has access to the {DB_NAME} database.\n"
+        f"# The app connects to MySQL as '{account}' ({DB_NAME} database).\n"
         "# SECRET_KEY signs the login tokens. Keep this file private.\n"
         f"DATABASE_URL={url}\n"
         f"SECRET_KEY={secret_key}\n"
@@ -430,15 +448,42 @@ def npm_command(*arguments: str) -> list[str]:
     return [npm, *arguments]
 
 
-def install_packages() -> bool:
+def install_packages(force: bool = False) -> bool:
     if not venv_exists():
         log_line("Create the virtual environment first.")
         return False
+    arguments = ["-m", "pip", "install", "--disable-pip-version-check"]
+    if force:
+        arguments.append("--force-reinstall")
+    arguments += ["-r", str(BACKEND_REQUIREMENTS)]
     log_line(f"Installing from {relative(BACKEND_REQUIREMENTS)} ...")
-    ok = stream_command([str(venv_python()), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(BACKEND_REQUIREMENTS)], "pip")
+    ok = stream_command([str(venv_python()), *arguments], "pip")
     if ok:
         log_line("Backend packages installed.")
     return ok
+
+
+def ensure_packages() -> bool:
+    """Make sure backend/venv holds everything the backend needs.
+
+    pymysql lives only in there, so a virtual environment that is missing it
+    breaks the database setup and the backend. A half-installed environment
+    is repaired too: pip trusts the leftover metadata and would otherwise
+    report every requirement as already satisfied.
+    """
+    if not venv_exists():
+        log_line("No virtual environment. Run option 2 first.")
+        return False
+    if packages_installed():
+        return True
+    if not install_packages():
+        return False
+    if packages_installed():
+        return True
+    log_line("Some packages are still missing. Reinstalling them ...")
+    if not install_packages(force=True):
+        return False
+    return packages_installed()
 
 
 def npm_install() -> bool:
@@ -602,16 +647,19 @@ def quote_sql(value: str) -> str:
     return f"'{escaped}'"
 
 
-def _connect_app(app_password: str):
+def db_connect(host: str, port: int, user: str, password: str, database: str | None = None):
+    """Open a MySQL connection. Returns (connection, error code, message)."""
     import pymysql
+
     try:
         connection = pymysql.connect(
-            host=DB_HOST, port=DB_PORT, user=DB_USER, password=app_password,
-            database=DB_NAME, charset="utf8mb4", connect_timeout=8, autocommit=True,
+            host=host, port=port, user=user, password=password, database=database,
+            charset="utf8mb4", connect_timeout=8, autocommit=True,
         )
     except Exception as exc:
-        return None, str(exc)
-    return connection, ""
+        code = exc.args[0] if exc.args and isinstance(exc.args[0], int) else 0
+        return None, code, str(exc)
+    return connection, 0, ""
 
 
 def _run_schema(connection) -> bool:
@@ -715,9 +763,23 @@ def _migration_statement_exists(cursor, statement: str) -> bool:
     return False
 
 
+def _ensure_migration_ledger(cursor) -> None:
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations ("
+        "filename VARCHAR(255) NOT NULL, "
+        "statement_index INT NOT NULL, "
+        "applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "PRIMARY KEY (filename, statement_index)"
+        ") ENGINE=InnoDB"
+    )
+
+
 def _run_schema_migrations(connection) -> bool:
     applied = 0
     with connection.cursor() as cursor:
+        _ensure_migration_ledger(cursor)
+        cursor.execute("SELECT filename, statement_index FROM schema_migrations")
+        recorded = set(cursor.fetchall())
         for migration_file in (
             ADMIN_MIGRATION_FILE,
             BENEFICIARIES_MIGRATION_FILE,
@@ -731,6 +793,7 @@ def _run_schema_migrations(connection) -> bool:
             CARD_LOST_MIGRATION_FILE,
             CUSTOMER_AVATAR_MIGRATION_FILE,
             ADMIN_MANAGEMENT_MIGRATION_FILE,
+            CUSTOMER_PROFILE_MIGRATION_FILE,
         ):
             if not migration_file.exists():
                 log_line(f"{relative(migration_file)} is missing.")
@@ -747,15 +810,23 @@ def _run_schema_migrations(connection) -> bool:
             ]
             log_line(f"Checking {relative(migration_file)} ...")
             for number, statement in enumerate(statements, start=1):
-                if _migration_statement_exists(cursor, statement):
+                key = (migration_file.name, number)
+                if key in recorded:
                     continue
-                try:
-                    cursor.execute(statement)
-                    applied += 1
-                except Exception as exc:
-                    log_line(f"Migration statement {number} failed: {exc}")
-                    log_line("  " + " ".join(statement.split())[:300])
-                    return False
+                # Statements applied before the ledger existed are detected from the
+                # schema and recorded without being executed again.
+                if not _migration_statement_exists(cursor, statement):
+                    try:
+                        cursor.execute(statement)
+                        applied += 1
+                    except Exception as exc:
+                        log_line(f"Migration statement {number} failed: {exc}")
+                        log_line("  " + " ".join(statement.split())[:300])
+                        return False
+                cursor.execute(
+                    "INSERT IGNORE INTO schema_migrations (filename, statement_index) VALUES (%s, %s)",
+                    key,
+                )
     log_line(f"Schema migrations checked ({applied} statements applied).")
     return True
 
@@ -822,42 +893,43 @@ def apply_schema_migrations() -> bool:
     return result.returncode == 0
 
 
-def _setup_database(admin_user: str, admin_password: str, app_password: str) -> bool:
-    import pymysql
+def create_database_and_user(payload: dict) -> bool:
+    """Create the database and the app account. Needs admin rights."""
+    admin_user = payload.get("admin_user", DB_ADMIN_USER)
+    admin_password = payload.get("admin_password", "")
+    host = payload.get("host", DB_HOST)
+    port = int(payload.get("port", DB_PORT))
+    database = payload.get("database", DB_NAME)
+    user = payload.get("user", DB_USER)
+    password = payload.get("password", "")
+
     log_line(f"Signing in to MySQL as '{admin_user}' ...")
-    try:
-        admin = pymysql.connect(host=DB_HOST, port=DB_PORT, user=admin_user, password=admin_password, charset="utf8mb4", connect_timeout=8, autocommit=True)
-    except Exception as exc:
-        log_line(f"Could not sign in to MySQL as '{admin_user}': {exc}")
-        log_line("Create the database manually in MySQL Workbench and run backend/db/schema.sql.")
+    admin, _, message = db_connect(host, port, admin_user, admin_password)
+    if admin is None:
+        log_line(f"Could not sign in to MySQL as '{admin_user}': {message}")
         return False
     try:
+        patterns = ["localhost"] if host == "localhost" else ["localhost", host]
+        is_root = user.lower() == "root"
         with admin.cursor() as cursor:
-            log_line(f"Creating database '{DB_NAME}' ...")
-            cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-            log_line(f"Creating MySQL user '{DB_USER}' ...")
-            cursor.execute(f"CREATE USER IF NOT EXISTS '{DB_USER}'@'localhost' IDENTIFIED BY {quote_sql(app_password)}")
-            cursor.execute(f"ALTER USER '{DB_USER}'@'localhost' IDENTIFIED BY {quote_sql(app_password)}")
-            cursor.execute(f"GRANT ALL PRIVILEGES ON `{DB_NAME}`.* TO '{DB_USER}'@'localhost'")
+            log_line(f"Creating database '{database}' ...")
+            cursor.execute(
+                f"CREATE DATABASE IF NOT EXISTS `{database}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
+            for pattern in patterns:
+                if is_root:
+                    log_line(f"Ensuring privileges for '{user}'@'{pattern}' ...")
+                else:
+                    log_line(f"Creating MySQL user '{user}'@'{pattern}' ...")
+                    cursor.execute(
+                        f"CREATE USER IF NOT EXISTS '{user}'@'{pattern}' IDENTIFIED BY {quote_sql(password)}"
+                    )
+                    cursor.execute(f"ALTER USER '{user}'@'{pattern}' IDENTIFIED BY {quote_sql(password)}")
+                cursor.execute(f"GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}'@'{pattern}'")
             cursor.execute("FLUSH PRIVILEGES")
         log_line("MySQL account ready.")
-        connection, error = _connect_app(app_password)
-        if connection is None:
-            log_line(f"Couldn't connect as '{DB_USER}'@'localhost': {error}")
-            log_line(f"Adding '{DB_USER}'@'{DB_HOST}' ...")
-            with admin.cursor() as cursor:
-                cursor.execute(f"CREATE USER IF NOT EXISTS '{DB_USER}'@'{DB_HOST}' IDENTIFIED BY {quote_sql(app_password)}")
-                cursor.execute(f"ALTER USER '{DB_USER}'@'{DB_HOST}' IDENTIFIED BY {quote_sql(app_password)}")
-                cursor.execute(f"GRANT ALL PRIVILEGES ON `{DB_NAME}`.* TO '{DB_USER}'@'{DB_HOST}'")
-                cursor.execute("FLUSH PRIVILEGES")
-            connection, error = _connect_app(app_password)
-            if connection is None:
-                log_line(f"Still couldn't connect: {error}")
-                return False
-        try:
-            return _run_schema(connection)
-        finally:
-            connection.close()
+        return True
     except Exception as exc:
         log_line(f"MySQL setup failed: {exc}")
         return False
@@ -865,30 +937,263 @@ def _setup_database(admin_user: str, admin_password: str, app_password: str) -> 
         admin.close()
 
 
-def setup_database() -> bool:
-    if database_check_code() == 5:
-        return apply_schema_migrations()
-    if not env_written():
-        print()
-        while True:
-            app_password = getpass.getpass(f"Password for MySQL user '{DB_USER}' (8-64 chars): ")
-            if valid_app_password(app_password):
-                break
-            print("Invalid password. Use letters, digits and . _ ~ ! # % + = , -")
-        if not write_env(app_password):
-            return False
-        write_frontend_env()
-    else:
-        env_data = read_env_file()
+def setup_database_child(payload: dict) -> int:
+    """Create the database if needed and apply the schema.
+
+    Runs inside the backend virtual environment.
+    """
+    try:
+        import pymysql  # noqa: F401
+    except ImportError:
+        log_line("pymysql is not installed in the backend virtual environment.")
+        return DB_SETUP_MISSING_PACKAGE
+
+    host = payload.get("host", DB_HOST)
+    port = int(payload.get("port", DB_PORT))
+    database = payload.get("database", DB_NAME)
+    user = payload.get("user", DB_USER)
+    password = payload.get("password", "")
+
+    if payload.get("mode") == "admin":
+        if not create_database_and_user(payload):
+            return DB_SETUP_FAILED
+
+    connection, code, message = db_connect(host, port, user, password, database)
+    if connection is None:
+        log_line(f"Could not connect to MySQL as '{user}': {message}")
+        if user.lower() == "root" and code in (1045, 1698):
+            log_line(
+                "The root password in backend/.env does not match this MySQL server."
+            )
+            log_line(
+                "Edit backend/.env (or delete it and run setup again) with the real root password."
+            )
+            return DB_SETUP_FAILED
+        if code in ADMIN_ERROR_CODES:
+            log_line("The account or the database does not exist yet.")
+            return DB_SETUP_NEEDS_ADMIN
+        log_line("Check that MySQL is running and that backend/.env holds the right details.")
+        return DB_SETUP_FAILED
+
+    try:
+        return DB_SETUP_OK if _run_schema(connection) else DB_SETUP_FAILED
+    finally:
+        connection.close()
+
+
+def run_db_helper(payload: dict) -> int:
+    """Run the database helper under the backend virtual environment.
+
+    pymysql is only installed in backend/venv, so the work has to happen
+    there. The payload goes over stdin, which keeps the passwords out of
+    the process list.
+    """
+    if not venv_exists():
+        log_line("No virtual environment. Run option 2 first.")
+        return DB_SETUP_FAILED
+    if not ensure_packages():
+        log_line("Could not install the backend packages.")
+        return DB_SETUP_FAILED
+    command = [str(venv_python()), str(ROOT / "dev.py"), "--internal-db-setup"]
+    try:
+        result = subprocess.run(
+            command,
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        log_line("The database helper took too long and was stopped.")
+        return DB_SETUP_FAILED
+    except (OSError, subprocess.SubprocessError) as exc:
+        log_line(f"Could not run the database helper: {exc}")
+        return DB_SETUP_FAILED
+    output = (result.stdout or "") + (result.stderr or "")
+    for line in output.splitlines():
+        if line.strip():
+            log_line(line)
+    if result.returncode == DB_SETUP_MISSING_PACKAGE:
+        log_line("pymysql is missing from backend/venv. Recreate the virtual environment (option 2).")
+        return DB_SETUP_FAILED
+    return result.returncode
+
+
+def prompt_password(prompt: str) -> str:
+    """Ask for a password, echoing one '*' per character.
+
+    Falls back to a plain line when stdin is not a terminal (a pipe cannot
+    be masked).
+    """
+    try:
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    if not interactive:
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
         try:
-            app_password = parse_db_url(env_data["DATABASE_URL"])["password"]
+            line = sys.stdin.readline()  # noqa
+            return line.rstrip("\r\n") if line else ""
         except Exception:
-            app_password = ""
+            return ""
+
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    characters: list[str] = []
+
+    def erase_last() -> None:
+        if characters:
+            characters.pop()
+            sys.stdout.write("\b \b")
+            sys.stdout.flush()
+
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            while True:
+                character = msvcrt.getwch()
+                if character in ("\r", "\n"):
+                    break
+                if character == "\x03":
+                    raise KeyboardInterrupt
+                if character == "\x08":
+                    erase_last()
+                elif character in ("\x00", "\xe0"):
+                    msvcrt.getwch()
+                else:
+                    characters.append(character)
+                    sys.stdout.write("*")
+                    sys.stdout.flush()
+        else:
+            import termios
+            import tty
+
+            descriptor = sys.stdin.fileno()
+            previous = termios.tcgetattr(descriptor)
+            try:
+                tty.setraw(descriptor)
+                while True:
+                    character = sys.stdin.read(1)
+                    if character in ("\r", "\n"):
+                        break
+                    if character == "\x03":
+                        raise KeyboardInterrupt
+                    if character in ("\x7f", "\x08"):
+                        erase_last()
+                    else:
+                        characters.append(character)
+                        sys.stdout.write("*")
+                        sys.stdout.flush()
+            finally:
+                termios.tcsetattr(descriptor, termios.TCSADRAIN, previous)
+    finally:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    return "".join(characters)
+
+
+def prompt_credentials(default_user: str, current_password: str = "") -> tuple[str, str]:
+    """Ask for a MySQL user and a masked password."""
+    user = input(f"  MySQL user [{default_user}]: ").strip() or default_user
+    while True:
+        prompt = f"  Password for '{user}'"
+        if current_password and user == default_user:
+            prompt += " (Enter keeps current)"
+        password = prompt_password(prompt + ": ")
+        if not password and current_password and user == default_user:
+            return user, current_password
+        if valid_app_password(password):
+            return user, password
+        print(f"Invalid password. {PASSWORD_HINT}")
+
+
+def setup_database(update_credentials: bool = True) -> bool:
+    """Configure backend/.env and make sure the MySQL schema is ready."""
+    existing_values = read_env_file()
+    existing_parts = None
+    if existing_values.get("DATABASE_URL"):
+        try:
+            existing_parts = parse_db_url(existing_values["DATABASE_URL"])
+        except ValueError:
+            existing_parts = None
+
+    if existing_parts is not None:
+        user = existing_parts["user"]
+        app_password = existing_parts.get("password", "")
+        if update_credentials:
+            print()
+            print(f"backend/.env already has MySQL user '{user}'.")
+            try:
+                answer = input("Update MySQL user/password? [y/n]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("")
+                return False
+            if answer in ("y", "yes"):
+                user, app_password = prompt_credentials(user, app_password)
+                if not write_env(app_password, user=user):
+                    return False
+    else:
+        print()
+        user, app_password = prompt_credentials(DB_USER, "")
+        if not write_env(app_password, user=user):
+            return False
+    write_frontend_env()
+
+    parts = dict(existing_parts) if existing_parts else {
+        "user": DB_USER, "password": "", "host": DB_HOST,
+        "port": DB_PORT, "database": DB_NAME,
+    }
+    parts["user"] = user
+    parts["password"] = app_password
+    account = parts["user"]
+    database = parts["database"]
+
     print()
-    print("MySQL admin credentials (used once, not saved):")
-    admin_user = input(f"  Admin user [{DB_ADMIN_USER}]: ").strip() or DB_ADMIN_USER
-    admin_password = getpass.getpass("  Admin password: ")
-    return _setup_database(admin_user, admin_password, app_password)
+    if database_check_code() == 5:
+        apply_schema_migrations()
+    if database_ready():
+        print("Database is ready.")
+        return True
+
+    payload = {
+        "mode": "app",
+        "user": account,
+        "password": parts["password"],
+        "host": parts["host"],
+        "port": parts["port"],
+        "database": database,
+    }
+    print()
+    code = run_db_helper(payload)
+    if code == DB_SETUP_NEEDS_ADMIN:
+        print()
+        print("MySQL admin credentials are only needed when the database or the account")
+        print(f"'{account}' does not exist yet. They are used once and never saved.")
+        print("Press Enter to skip this step and set the database up by hand.")
+        admin_user = input(f"  Admin user [{DB_ADMIN_USER}]: ").strip() or DB_ADMIN_USER
+        admin_password = prompt_password("  Admin password: ")
+        if not admin_password:
+            print()
+            print("Skipping the admin step. To finish by hand:")
+            print("  1. Create the database and the account in MySQL Workbench:")
+            print(f"       CREATE DATABASE {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+            print(f"       CREATE USER '{account}'@'localhost' IDENTIFIED BY '<the password in backend/.env>';")
+            print(f"       GRANT ALL PRIVILEGES ON {database}.* TO '{account}'@'localhost';")
+            print("       FLUSH PRIVILEGES;")
+            print(f"  2. Run {relative(SCHEMA_FILE)} on the new database.")
+            print("  3. Run this tool again.")
+            return False
+        payload.update({"mode": "admin", "admin_user": admin_user, "admin_password": admin_password})
+        code = run_db_helper(payload)
+
+    if code != DB_SETUP_OK:
+        print("Database setup failed. See the messages above.")
+        return False
+    if database_check_code() == 5:
+        apply_schema_migrations()
+    return database_ready()
 
 
 def spawn_options() -> dict:
@@ -922,6 +1227,9 @@ def start_backend() -> subprocess.Popen | None:
         return None
     if not venv_exists():
         log_line("No virtual environment. Run setup first.")
+        return None
+    if not ensure_packages():
+        log_line("Could not install the backend packages.")
         return None
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
@@ -1084,10 +1392,10 @@ def do_setup() -> bool:
     if not env_written():
         print()
         while True:
-            app_password = getpass.getpass(f"Password for MySQL user '{DB_USER}' (8-64 chars): ")
+            app_password = prompt_password(f"Password for MySQL user '{DB_USER}' (8-128 chars): ")
             if valid_app_password(app_password):
                 break
-            print("Invalid password. Use letters, digits and . _ ~ ! # % + = , -")
+            print(f"Invalid password. {PASSWORD_HINT}")
         if not write_env(app_password):
             return False
         write_frontend_env()
@@ -1096,7 +1404,7 @@ def do_setup() -> bool:
         if not apply_schema_migrations():
             return False
     elif database_check != 0:
-        if not setup_database():
+        if not setup_database(update_credentials=False):
             return False
     if not database_ready():
         log_line("Database setup finished, but the required schema is still not ready.")
@@ -1189,8 +1497,12 @@ def main(argv: list[str] | None = None) -> int:
             payload = json.loads(sys.stdin.read() or "{}")
         except json.JSONDecodeError:
             log_line("Bad payload")
-            return 1
-        return 0 if _setup_database(payload.get("admin_user", DB_ADMIN_USER), payload.get("admin_password", ""), payload.get("app_password", "")) else 1
+            return DB_SETUP_FAILED
+        try:
+            return setup_database_child(payload)
+        except Exception as exc:
+            log_line(f"The database helper failed: {exc}")
+            return DB_SETUP_FAILED
 
     if args.internal_schema_migration:
         return 0 if _apply_schema_migrations() else 1

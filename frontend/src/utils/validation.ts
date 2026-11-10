@@ -21,6 +21,13 @@ export const password = (value: string): string | undefined => {
 
 const NAME_PATTERN = /^[\p{L} .'-]+$/u;
 
+export const sanitizeName = (value: string): string => value.replace(/[^\p{L} .'-]/gu, '');
+
+export const sanitizeAmount = (value: string): string => {
+  const [whole, ...decimals] = value.replace(/[^\d.]/g, '').split('.');
+  return decimals.length ? `${whole}.${decimals.join('').slice(0, 2)}` : whole;
+};
+
 export const name = (label = 'Name'): Validator => (value) => {
   const trimmed = value.trim();
   if (!trimmed) return `${label} is required.`;
@@ -33,6 +40,29 @@ export const name = (label = 'Name'): Validator => (value) => {
 
 export const optionalName = (label = 'Name'): Validator => (value) =>
   value.trim() ? name(label)(value) : undefined;
+
+export const optionalShortName =
+  (label = 'Name', max = 10): Validator =>
+  (value) => {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (trimmed.length > max) return `${label} must be ${max} characters or fewer.`;
+    return NAME_PATTERN.test(trimmed)
+      ? undefined
+      : `${label} can only contain letters, spaces, hyphens, apostrophes, and periods.`;
+  };
+
+export const postalCode = (value: string): string | undefined => {
+  const trimmed = value.trim();
+  if (!trimmed) return 'ZIP / Postal code is required.';
+  return /^\d{4}$/.test(trimmed) ? undefined : 'Enter a 4-digit ZIP / postal code.';
+};
+
+export const amount = (label = 'Amount'): Validator => (value) => {
+  const trimmed = value.trim();
+  if (!trimmed) return `${label} is required.`;
+  return /^\d+(\.\d{1,2})?$/.test(trimmed) ? undefined : 'Enter a valid amount.';
+};
 
 export const confirmMatch =
   (original: string, label = 'Passwords'): Validator =>

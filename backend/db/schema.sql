@@ -23,6 +23,17 @@ CREATE TABLE customers (
     email VARCHAR(254) NOT NULL UNIQUE,
     phone VARCHAR(20) NULL,
     address VARCHAR(255) NULL,
+    city VARCHAR(100) NULL,
+    state_region VARCHAR(100) NULL,
+    postal_code VARCHAR(10) NULL,
+    mailing_same_as_residential BOOLEAN NOT NULL DEFAULT FALSE,
+    civil_status VARCHAR(20) NULL,
+    suffix VARCHAR(10) NULL,
+    employment_status VARCHAR(30) NULL,
+    occupation VARCHAR(100) NULL,
+    employer_name VARCHAR(150) NULL,
+    annual_gross_income DECIMAL(14, 2) NULL,
+    account_ownership_type VARCHAR(30) NULL,
     avatar MEDIUMTEXT NULL,
 
     status ENUM('ACTIVE', 'INACTIVE')

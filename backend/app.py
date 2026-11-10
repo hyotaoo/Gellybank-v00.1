@@ -288,6 +288,17 @@ class Customer(db.Model):
     email = db.Column(db.String(254), nullable=False, unique=True)
     phone = db.Column(db.String(20))
     address = db.Column(db.String(255))
+    city = db.Column(db.String(100))
+    state_region = db.Column(db.String(100))
+    postal_code = db.Column(db.String(10))
+    mailing_same_as_residential = db.Column(db.Boolean, nullable=False, default=False)
+    civil_status = db.Column(db.String(20))
+    suffix = db.Column(db.String(10))
+    employment_status = db.Column(db.String(30))
+    occupation = db.Column(db.String(100))
+    employer_name = db.Column(db.String(150))
+    annual_gross_income = db.Column(db.Numeric(14, 2))
+    account_ownership_type = db.Column(db.String(30))
     avatar = db.Column(db.Text().with_variant(MEDIUMTEXT(), "mysql"))
     status = db.Column(db.String(20), nullable=False, default="ACTIVE")
     terms_accepted_at = db.Column(db.DateTime)
@@ -3202,6 +3213,15 @@ def parse_date(value):
         return None
 
 
+def parse_amount(value):
+    if value in (None, ""):
+        return None
+    try:
+        return to_money(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def join_phone(country_code, phone):
     combined = f"{country_code or ''}{phone or ''}".strip()
     return combined[:20] or None
@@ -3282,6 +3302,17 @@ def register():
         email=email,
         phone=join_phone(data.get("countryCode"), data.get("phone")),
         address=(data.get("address") or "").strip() or None,
+        city=(data.get("city") or "").strip()[:100] or None,
+        state_region=(data.get("stateRegion") or "").strip()[:100] or None,
+        postal_code=(data.get("postalCode") or "").strip()[:10] or None,
+        mailing_same_as_residential=bool(data.get("mailingSameAsResidential")),
+        civil_status=(data.get("civilStatus") or "").strip()[:20] or None,
+        suffix=(data.get("suffix") or "").strip()[:10] or None,
+        employment_status=(data.get("employmentStatus") or "").strip()[:30] or None,
+        occupation=(data.get("occupation") or "").strip()[:100] or None,
+        employer_name=(data.get("employerName") or "").strip()[:150] or None,
+        annual_gross_income=parse_amount(data.get("annualGrossIncome")),
+        account_ownership_type=(data.get("accountOwnershipType") or "").strip()[:30] or None,
         terms_accepted_at=accepted_at,
         privacy_accepted_at=accepted_at,
         consent_version=CONSENT_VERSION,
@@ -3490,6 +3521,21 @@ def get_profile():
         "email": customer.email,
         "phone": customer.phone,
         "address": customer.address,
+        "suffix": customer.suffix,
+        "civilStatus": customer.civil_status,
+        "city": customer.city,
+        "stateRegion": customer.state_region,
+        "postalCode": customer.postal_code,
+        "mailingSameAsResidential": customer.mailing_same_as_residential,
+        "employmentStatus": customer.employment_status,
+        "occupation": customer.occupation,
+        "employerName": customer.employer_name,
+        "annualGrossIncome": (
+            float(customer.annual_gross_income)
+            if customer.annual_gross_income is not None
+            else None
+        ),
+        "accountOwnershipType": customer.account_ownership_type,
         "avatar": customer.avatar,
         "emailVerified": user.email_verified_at is not None,
         "customerStatus": customer.status,
@@ -3561,6 +3607,21 @@ def update_profile():
         "email": customer.email,
         "phone": customer.phone,
         "address": customer.address,
+        "suffix": customer.suffix,
+        "civilStatus": customer.civil_status,
+        "city": customer.city,
+        "stateRegion": customer.state_region,
+        "postalCode": customer.postal_code,
+        "mailingSameAsResidential": customer.mailing_same_as_residential,
+        "employmentStatus": customer.employment_status,
+        "occupation": customer.occupation,
+        "employerName": customer.employer_name,
+        "annualGrossIncome": (
+            float(customer.annual_gross_income)
+            if customer.annual_gross_income is not None
+            else None
+        ),
+        "accountOwnershipType": customer.account_ownership_type,
         "avatar": customer.avatar,
         "emailVerified": user.email_verified_at is not None,
         "customerStatus": customer.status,
