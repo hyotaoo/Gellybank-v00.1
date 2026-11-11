@@ -19,12 +19,14 @@ import re
 import secrets
 import shutil
 import signal
+import smtplib
 import socket
 import subprocess
 import sys
 import threading
 import time
 import urllib.error
+from email.message import EmailMessage
 from urllib.parse import quote, unquote
 import urllib.request
 from pathlib import Path
@@ -321,13 +323,16 @@ def write_env(app_password: str, user: str | None = None) -> bool:
         secret_key = secrets.token_urlsafe(48)
     encoded_password = quote(app_password, safe="")
     url = f"mysql+pymysql://{account}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    content = (
-        "# Written by dev.py.\n"
-        f"# The app connects to MySQL as '{account}' ({DB_NAME} database).\n"
-        "# SECRET_KEY signs the login tokens. Keep this file private.\n"
-        f"DATABASE_URL={url}\n"
-        f"SECRET_KEY={secret_key}\n"
-    )
+    lines = [
+        "# Written by dev.py.",
+        f"# The app connects to MySQL as '{account}' ({DB_NAME} database).",
+        "# SECRET_KEY signs the login tokens. Keep this file private.",
+        f"DATABASE_URL={url}",
+        f"SECRET_KEY={secret_key}",
+    ]
+    # Keys dev.py does not manage (for example SMTP_*) are kept.
+    lines += [f"{key}={value}" for key, value in existing.items() if key not in ("DATABASE_URL", "SECRET_KEY")]
+    content = "\n".join(lines) + "\n"
     try:
         ENV_FILE.write_text(content, encoding="utf-8")
         log_line(f"Wrote {relative(ENV_FILE)}")
@@ -348,6 +353,157 @@ def write_frontend_env() -> bool:
     except OSError as exc:
         log_line(f"Could not write {relative(FRONTEND_ENV_FILE)}: {exc}")
         return False
+
+
+def write_smtp_env(values: dict[str, str]) -> bool:
+    """Write SMTP settings to backend/.env, keeping the other lines."""
+    try:
+        text = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else ""
+    except OSError:
+        text = ""
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            lines.append(line)
+            continue
+        if not stripped.split("=", 1)[0].strip().startswith("SMTP_"):
+            lines.append(line)
+    lines += [f"{key}={value}" for key, value in values.items()]
+    content = "\n".join(lines) + "\n"
+    try:
+        ENV_FILE.write_text(content, encoding="utf-8")
+        log_line(f"Wrote {relative(ENV_FILE)}")
+        return True
+    except OSError as exc:
+        log_line(f"Could not write {relative(ENV_FILE)}: {exc}")
+        return False
+
+
+def prompt_smtp_config() -> dict[str, str] | None:
+    """Ask for SMTP details. Returns None when no host is given."""
+    try:
+        host = input("  SMTP host (Enter for none): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("")
+        return None
+    if not host:
+        return None
+    port = 587
+    while True:
+        answer = input("  SMTP port [587]: ").strip()
+        if not answer:
+            break
+        try:
+            port = int(answer)
+        except ValueError:
+            print("Invalid port.")
+            continue
+        if 1 <= port <= 65535:
+            break
+        print("Invalid port.")
+    user = input("  SMTP user (Enter for none): ").strip()
+    password = prompt_password("  SMTP password (Enter for none): ") if user else ""
+    sender_prompt = f"  Sender address (SMTP_FROM) [{user}]: " if user else "  Sender address (SMTP_FROM): "
+    while True:
+        sender = input(sender_prompt).strip() or user
+        if sender:
+            break
+        print("Sender address is required.")
+    use_ssl = input("  Use SSL (e.g. port 465) instead of STARTTLS? [y/N]: ").strip().lower() in ("y", "yes")
+    values = {"SMTP_HOST": host, "SMTP_PORT": str(port), "SMTP_FROM": sender}
+    if user:
+        values["SMTP_USER"] = user
+        if password:
+            values["SMTP_PASSWORD"] = password
+    if use_ssl:
+        values["SMTP_USE_SSL"] = "1"
+    return values
+
+
+def prompt_test_recipient(values: dict[str, str]) -> str:
+    default = values.get("SMTP_FROM", "")
+    prompt = f"  Send a test email to [{default}]: " if default else "  Send a test email to: "
+    try:
+        answer = input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        print("")
+        return ""
+    return answer or default
+
+
+def send_test_email(values: dict[str, str], recipient: str) -> bool:
+    host = values["SMTP_HOST"]
+    port = int(values.get("SMTP_PORT", "587"))
+    use_ssl = values.get("SMTP_USE_SSL") == "1"
+    username = values.get("SMTP_USER")
+    password = values.get("SMTP_PASSWORD", "")
+    sender = values["SMTP_FROM"]
+
+    message = EmailMessage()
+    message["Subject"] = "Gellybank SMTP test"
+    message["From"] = sender
+    message["To"] = recipient
+    message.set_content(
+        "This is a test email from the Gellybank developer tool.\n"
+        "If you can read it, the SMTP settings in backend/.env work."
+    )
+
+    try:
+        if use_ssl:
+            client = smtplib.SMTP_SSL(host, port, timeout=15)
+        else:
+            client = smtplib.SMTP(host, port, timeout=15)
+    except (OSError, smtplib.SMTPException) as exc:
+        log_line(f"Could not reach {host}:{port}: {exc}")
+        return False
+    sent = False
+    try:
+        if not use_ssl:
+            client.starttls()
+        if username:
+            client.login(username, password)
+        client.send_message(message)
+        sent = True
+    except (OSError, smtplib.SMTPException) as exc:
+        log_line(f"Test email failed: {exc}")
+    finally:
+        try:
+            client.quit()
+        except Exception:
+            pass
+    if sent:
+        log_line(f"Test email sent to {recipient}.")
+    return sent
+
+
+def configure_smtp() -> None:
+    """Ask for SMTP settings, write them to backend/.env, and test them."""
+    existing = read_env_file()
+    if existing.get("SMTP_HOST"):
+        print(f"backend/.env already has SMTP host '{existing['SMTP_HOST']}'.")
+        try:
+            answer = input("Update email (SMTP) settings? [y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("")
+            return
+        if answer not in ("y", "yes"):
+            return
+    values = prompt_smtp_config()
+    if values is None:
+        if existing.get("SMTP_HOST"):
+            if write_smtp_env({}):
+                log_line("Removed the SMTP settings from backend/.env.")
+        else:
+            log_line("Email left unconfigured.")
+        return
+    if not write_smtp_env(values):
+        return
+    recipient = prompt_test_recipient(values)
+    if recipient:
+        send_test_email(values, recipient)
 
 
 def node_version() -> str | None:
@@ -385,6 +541,11 @@ def show_status() -> None:
         database_detail, database_state = f"{env_database_name()} needs schema migration", "missing"
     else:
         database_detail, database_state = f"{env_database_name()} not ready", "missing"
+    smtp_values = read_env_file()
+    if smtp_values.get("SMTP_HOST"):
+        email_detail, email_state = f"{smtp_values['SMTP_HOST']}:{smtp_values.get('SMTP_PORT', '587')}", "ok"
+    else:
+        email_detail, email_state = "not configured", "missing"
     checks = [
         ("Python", f"{platform.python_version()} ({platform.system()})", "ok"),
         ("Node.js", node_version() or "not found", "ok" if node_version() else "missing"),
@@ -393,6 +554,7 @@ def show_status() -> None:
         ("Virtual env", relative(VENV) if venv_exists() else "not created", "ok" if venv_exists() else "missing"),
         ("Python packages", "installed" if packages_installed() else "not installed", "ok" if packages_installed() else "missing"),
         ("backend/.env", "written" if env_written() else "not written", "ok" if env_written() else "missing"),
+        ("Email (SMTP)", email_detail, email_state),
         ("MySQL database", database_detail, database_state),
         ("Frontend packages", "installed" if node_modules_ready() else "not installed", "ok" if node_modules_ready() else "missing"),
     ]
@@ -591,6 +753,21 @@ def restore_database(filename: str | None = None) -> bool:
         return False
     log_line(f"Restoring {relative(path)} ...")
     return run_project_script(RESTORE_SCRIPT, str(path))
+
+
+def backup_or_restore() -> None:
+    """Ask whether to back up or restore, then run it."""
+    try:
+        answer = input("  Back up or restore? [B/R]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("")
+        return
+    if answer in ("b", "backup"):
+        backup_database()
+    elif answer in ("r", "restore"):
+        restore_database()
+    else:
+        print("  Unknown choice.")
 
 
 def split_sql_statements(script: str) -> list[str]:
@@ -1138,7 +1315,7 @@ def prompt_credentials(default_user: str, current_password: str = "") -> tuple[s
         print(f"Invalid password. {PASSWORD_HINT}")
 
 
-def setup_database(update_credentials: bool = True) -> bool:
+def setup_database(update_credentials: bool = True, smtp_setup: bool = True) -> bool:
     """Configure backend/.env and make sure the MySQL schema is ready."""
     existing_values = read_env_file()
     existing_parts = None
@@ -1168,6 +1345,9 @@ def setup_database(update_credentials: bool = True) -> bool:
         user, app_password = prompt_credentials(DB_USER, "")
         if not write_env(app_password, user=user):
             return False
+    if smtp_setup:
+        print()
+        configure_smtp()
     write_frontend_env()
 
     parts = dict(existing_parts) if existing_parts else {
@@ -1437,7 +1617,7 @@ def do_setup() -> bool:
         write_frontend_env()
     database_check = database_check_code()
     if database_check not in (0, 5):
-        if not setup_database(update_credentials=False):
+        if not setup_database(update_credentials=False, smtp_setup=False):
             return False
     elif not apply_schema_migrations():
         return False
@@ -1464,18 +1644,16 @@ def menu() -> int:
         print("  1) Set up everything (venv, packages, .env, database, npm)")
         print("  2) Create virtual environment")
         print("  3) Install Python packages")
-        print("  4) Configure backend/.env + create MySQL database")
+        print("  4) Configure backend/.env (MySQL + SMTP) + create database")
         print("  5) Install frontend packages")
-        print("  6) Start servers")
-        print("  7) Stop servers")
-        print("  8) Create teller account")
-        print("  9) Remove teller account")
-        print(" 10) Create admin account")
-        print(" 11) Remove admin account")
-        print(" 12) Refresh status")
-        print(" 13) Quit")
-        print(" 14) Back up database")
-        print(" 15) Restore database")
+        print("  6) Create teller account")
+        print("  7) Remove teller account")
+        print("  8) Create admin account")
+        print("  9) Remove admin account")
+        print(" 10) Back up / Restore database")
+        print(" (R) Refresh status")
+        print(" (S) Start servers")
+        print(" (Q) Quit")
         print("")
         try:
             choice = input("  > ").strip().lower()
@@ -1483,7 +1661,7 @@ def menu() -> int:
             print("")
             stop_all()
             return 0
-        if choice in ("q", "13", "quit", "exit"):
+        if choice in ("q", "quit", "exit"):
             stop_all()
             return 0
         elif choice in ("1", "setup", "all"):
@@ -1496,24 +1674,20 @@ def menu() -> int:
             setup_database()
         elif choice in ("5", "npm"):
             npm_install()
-        elif choice in ("6", "start"):
-            start_all()
-        elif choice in ("7", "stop"):
-            stop_all()
-        elif choice in ("8", "teller"):
+        elif choice in ("6", "teller"):
             create_teller_account()
-        elif choice in ("9", "remove-teller"):
+        elif choice in ("7", "remove-teller"):
             remove_teller_account()
-        elif choice in ("10", "admin"):
+        elif choice in ("8", "admin"):
             create_admin_account()
-        elif choice in ("11", "remove-admin"):
+        elif choice in ("9", "remove-admin"):
             remove_admin_account()
-        elif choice in ("12", "status", "refresh"):
+        elif choice in ("10", "backup", "restore"):
+            backup_or_restore()
+        elif choice in ("r", "status", "refresh"):
             pass
-        elif choice in ("14", "backup"):
-            backup_database()
-        elif choice in ("15", "restore"):
-            restore_database()
+        elif choice in ("s", "start"):
+            start_all()
         else:
             print("  Unknown option.")
 
