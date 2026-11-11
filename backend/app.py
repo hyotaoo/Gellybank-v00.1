@@ -749,7 +749,7 @@ class BankSetting(db.Model):
     __tablename__ = "bank_settings"
 
     setting_id = db.Column(SMALL_ID_TYPE, primary_key=True, autoincrement=True)
-    bank_name = db.Column(db.String(80), nullable=False, default="GellyBank!")
+    bank_name = db.Column(db.String(80), nullable=False, default="GellyBank")
     contact_email = db.Column(db.String(254))
     contact_phone = db.Column(db.String(20))
     address = db.Column(db.String(255))

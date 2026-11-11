@@ -4,7 +4,7 @@ import { getPublicSettings } from '@/api/settings';
 import type { PublicBankSettings } from '@/api/settings';
 
 const DEFAULT_SETTINGS: PublicBankSettings = {
-  bankName: 'GellyBank!',
+  bankName: 'GellyBank',
   contactEmail: null,
   contactPhone: null,
   address: null,
@@ -30,7 +30,7 @@ export const BankSettingsProvider = ({ children }: { children: ReactNode }) => {
     getPublicSettings()
       .then((data) => setSettings(data))
       .catch(() => {
-        // Keep defaults; branding falls back to GellyBank!
+        // Keep defaults; branding falls back to GellyBank
       })
       .finally(() => setLoaded(true));
   }, []);

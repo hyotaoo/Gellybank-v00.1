@@ -558,7 +558,7 @@ JOIN bank_accounts AS a
 
 CREATE TABLE bank_settings (
     setting_id SMALLINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    bank_name VARCHAR(80) NOT NULL DEFAULT 'GellyBank!',
+    bank_name VARCHAR(80) NOT NULL DEFAULT 'GellyBank',
     contact_email VARCHAR(254) NULL,
     contact_phone VARCHAR(20) NULL,
     address VARCHAR(255) NULL,

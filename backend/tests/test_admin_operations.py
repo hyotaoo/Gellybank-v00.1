@@ -640,7 +640,7 @@ class AdminOperationsTests(unittest.TestCase):
     def test_bank_settings_and_maintenance_mode(self):
         public = self.client.get("/api/settings")
         self.assertEqual(public.status_code, 200)
-        self.assertEqual(public.json["bankName"], "GellyBank!")
+        self.assertEqual(public.json["bankName"], "GellyBank")
         self.assertFalse(public.json["maintenanceMode"])
         self.assertIsNone(public.json["logo"])
 
