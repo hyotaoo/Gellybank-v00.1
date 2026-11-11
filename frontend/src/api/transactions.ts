@@ -15,6 +15,9 @@ export interface Transaction {
   reference: string;
   status: TransactionStatus;
   createdAt: string;
+  accountNumber?: string | null;
+  accountLabel?: string | null;
+  customerName?: string | null;
 }
 
 export interface CreateTransactionInput {

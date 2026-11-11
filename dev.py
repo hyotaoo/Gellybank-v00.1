@@ -49,6 +49,7 @@ DROP_AI_INSIGHTS_MIGRATION_FILE = BACKEND / "db" / "migrations" / "009_drop_ai_i
 CARD_LOST_MIGRATION_FILE = BACKEND / "db" / "migrations" / "010_card_lost_requests.sql"
 CUSTOMER_AVATAR_MIGRATION_FILE = BACKEND / "db" / "migrations" / "011_customer_avatar.sql"
 ADMIN_MANAGEMENT_MIGRATION_FILE = BACKEND / "db" / "migrations" / "012_admin_management.sql"
+REQUEST_REFERENCE_MIGRATION_FILE = BACKEND / "db" / "migrations" / "014_request_references.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 BACKUP_SCRIPT = ROOT / "scripts" / "backup_db.sh"
 RESTORE_SCRIPT = ROOT / "scripts" / "restore_db.sh"
@@ -701,7 +702,7 @@ def _migration_statement_exists(cursor, statement: str) -> bool:
         return cursor.fetchone() is not None
 
     create_index = re.match(
-        r"^\s*CREATE\s+INDEX\s+`?(\w+)`?\s+ON\s+`?(\w+)`?",
+        r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+`?(\w+)`?\s+ON\s+`?(\w+)`?",
         statement,
         re.IGNORECASE,
     )
@@ -712,6 +713,29 @@ def _migration_statement_exists(cursor, statement: str) -> bool:
             (create_index.group(2), create_index.group(1)),
         )
         return cursor.fetchone() is not None
+
+    modify_column = re.match(
+        r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+MODIFY\s+(?:COLUMN\s+)?`?(\w+)`?\s+(.+)$",
+        statement,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if modify_column:
+        table, column, definition = modify_column.groups()
+        cursor.execute(
+            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            (table, column),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return False
+        target = re.match(r"\s*enum\s*\((.*?)\)", definition, re.IGNORECASE | re.DOTALL)
+        current = re.match(r"enum\((.*)\)", row[0] or "", re.IGNORECASE | re.DOTALL)
+        if not target or not current:
+            return False
+        wanted = {value.strip().strip("'") for value in target.group(1).split(",")}
+        existing = {value.strip().strip("'") for value in current.group(1).split(",")}
+        return wanted <= existing
     return False
 
 
@@ -731,6 +755,7 @@ def _run_schema_migrations(connection) -> bool:
             CARD_LOST_MIGRATION_FILE,
             CUSTOMER_AVATAR_MIGRATION_FILE,
             ADMIN_MANAGEMENT_MIGRATION_FILE,
+            REQUEST_REFERENCE_MIGRATION_FILE,
         ):
             if not migration_file.exists():
                 log_line(f"{relative(migration_file)} is missing.")

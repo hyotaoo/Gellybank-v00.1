@@ -21,7 +21,7 @@ done
 
 command -v mysql >/dev/null || { echo "mysql not found. Install MySQL client tools." >&2; exit 1; }
 
-if [ $# -ne 1 ]; then
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
     echo "Usage: $0 <backup-file.sql> [--yes]" >&2
     echo "Available backups:"
     ls -1 backups/*.sql 2>/dev/null || echo "  (none)"
@@ -64,11 +64,38 @@ if [ "$CONFIRMED" != "--yes" ]; then
     fi
 fi
 
-mysql \
+# Dumps can contain views owned by another MySQL account (mysqldump records
+# DEFINER=`root`@`localhost`). Replacing such a view requires the SYSTEM_USER
+# privilege the application user does not have, which aborts the restore with
+# ERROR 1227. The application does not use views, so skip their DDL.
+#
+# Every base table is dropped before the dump is applied: dumps mix foreign key
+# columns of different signedness (the dump uses BIGINT UNSIGNED, while tables
+# created by the app use BIGINT), and MySQL rejects a CREATE TABLE whose foreign
+# key column does not match an existing table (ERROR 3780) even when foreign key
+# checks are disabled.
+{
+    echo "USE \`$DB_NAME\`;"
+    echo "SET FOREIGN_KEY_CHECKS = 0;"
+    mysql \
+        --host="$DB_HOST" \
+        --port="${DB_PORT:-3306}" \
+        --user="$DB_USER" \
+        --password="$DB_PASS" \
+        --skip-column-names --batch \
+        -e "SELECT CONCAT('DROP TABLE IF EXISTS \`', TABLE_NAME, '\`;') FROM information_schema.TABLES WHERE TABLE_SCHEMA = '$DB_NAME' AND TABLE_TYPE = 'BASE TABLE'"
+    awk '
+        /^-- (Temporary|Final) view structure for view / { skip = 1; next }
+        skip && /^\/\*!50001 SET character_set_client .*= @saved_cs_client/ { drain = 2; skip = 0; next }
+        skip && /^SET character_set_client .*= @saved_cs_client/ { skip = 0; next }
+        drain > 0 { drain--; next }
+        skip { next }
+        { print }
+    ' "$FILE"
+} | mysql \
     --host="$DB_HOST" \
     --port="${DB_PORT:-3306}" \
     --user="$DB_USER" \
-    --password="$DB_PASS" \
-    < "$FILE"
+    --password="$DB_PASS"
 
 echo "Restore complete."

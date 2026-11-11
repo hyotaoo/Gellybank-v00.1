@@ -12,6 +12,7 @@ import type {
   AdminAccountTransaction,
 } from '@/api/admin';
 import Button from '@/components/common/Button';
+import { useToast } from '@/components/common/Toast';
 import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
@@ -72,6 +73,7 @@ const AdminAccountsPage = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [confirming, setConfirming] = useState<AdminAccountAction>();
   const [acting, setActing] = useState(false);
+  const toast = useToast();
 
   const refresh = async (term: string, silent = false) => {
     if (!silent) setLoading(true);
@@ -125,8 +127,9 @@ const AdminAccountsPage = () => {
       setDetail((current) => current && { ...current, account: updated });
       setAccounts((current) => current.map((item) => item.id === updated.id ? updated : item));
       setConfirming(undefined);
+      toast.success(`${actionLabel[action]} succeeded for account ${updated.accountNumber}.`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to update this account.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to update this account.');
     } finally {
       setActing(false);
       setBusyId(undefined);

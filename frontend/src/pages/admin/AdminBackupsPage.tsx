@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ApiError } from '@/api/client';
 import {
+  deleteBackup,
+  deleteDatabase,
   downloadBackup,
   generateBackup,
   listBackups,
@@ -9,6 +11,7 @@ import {
 import type { BackupFile } from '@/api/admin';
 import Button from '@/components/common/Button';
 import Input from '@/components/common/Input';
+import { useToast } from '@/components/common/Toast';
 import usePolling from '@/hooks/usePolling';
 
 const HEADER_BUTTON_CLASS = 'h-[48px] px-6 text-[15px] font-semibold';
@@ -30,6 +33,11 @@ const AdminBackupsPage = () => {
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [showRestoreForm, setShowRestoreForm] = useState(false);
+  const [deleting, setDeleting] = useState<string>();
+  const [deletingDatabase, setDeletingDatabase] = useState(false);
+  const [deleteDbConfirm, setDeleteDbConfirm] = useState('');
+  const [showDeleteDbForm, setShowDeleteDbForm] = useState(false);
+  const toast = useToast();
 
   const refresh = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -64,8 +72,9 @@ const AdminBackupsPage = () => {
     setError(undefined);
     try {
       triggerDownload(name, await downloadBackup(name));
+      toast.success(`Downloaded ${name}.`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to download the backup.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to download the backup.');
     } finally {
       setDownloading(undefined);
     }
@@ -84,10 +93,42 @@ const AdminBackupsPage = () => {
         }
       }
       await refresh();
+      toast.success('Backup generated.');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to generate a backup.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to generate a backup.');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleDeleteBackup = async (name: string) => {
+    if (!window.confirm(`Delete backup "${name}"? This cannot be undone.`)) return;
+    setDeleting(name);
+    setError(undefined);
+    try {
+      await deleteBackup(name);
+      await refresh();
+      toast.success(`Deleted ${name}.`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Unable to delete the backup.');
+    } finally {
+      setDeleting(undefined);
+    }
+  };
+
+  const handleDeleteDatabase = async () => {
+    setDeletingDatabase(true);
+    setError(undefined);
+    try {
+      await deleteDatabase();
+      setShowDeleteDbForm(false);
+      setDeleteDbConfirm('');
+      await refresh();
+      toast.success('Database deleted.');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Unable to delete the database.');
+    } finally {
+      setDeletingDatabase(false);
     }
   };
 
@@ -101,8 +142,9 @@ const AdminBackupsPage = () => {
       setShowRestoreForm(false);
       setRestoreFile(null);
       setRestoreConfirm('');
+      toast.success('Backup restored successfully.');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to restore the backup.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to restore the backup.');
     } finally {
       setRestoring(false);
     }
@@ -131,7 +173,49 @@ const AdminBackupsPage = () => {
         >
           {showRestoreForm ? 'Cancel restore' : 'Restore a backup'}
         </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          className={`${HEADER_BUTTON_CLASS} text-red-700 hover:text-ink`}
+          onClick={() => {
+            setShowDeleteDbForm((open) => !open);
+            setDeleteDbConfirm('');
+          }}
+        >
+          {showDeleteDbForm ? 'Cancel delete' : 'Delete database'}
+        </Button>
       </div>
+
+      {showDeleteDbForm && (
+        <div className="flex flex-col gap-4 rounded-2xl border border-red-300 bg-red-50 p-5">
+          <p className="text-sm font-medium text-ink">
+            Deleting the database erases every customer and teller account and transaction, then
+            recreates an empty schema. Your admin account is kept. Backup files on disk are kept.
+            This cannot be undone.
+          </p>
+          <label className="flex flex-col gap-2 text-sm font-medium text-ink">
+            Type DELETE DATABASE to confirm
+            <div className="max-w-md">
+              <Input
+                value={deleteDbConfirm}
+                onChange={(event) => setDeleteDbConfirm(event.target.value)}
+                placeholder="DELETE DATABASE"
+                autoComplete="off"
+              />
+            </div>
+          </label>
+          <div>
+            <button
+              type="button"
+              onClick={() => void handleDeleteDatabase()}
+              disabled={deletingDatabase || deleteDbConfirm !== 'DELETE DATABASE'}
+              className="h-[48px] rounded-[20px] bg-red-700 px-6 text-[15px] font-semibold text-white transition-colors hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {deletingDatabase ? 'Deleting…' : 'Delete database'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {showRestoreForm && (
         <div className="flex flex-col gap-4 rounded-2xl border border-red-300 bg-red-50 p-5">
@@ -209,13 +293,24 @@ const AdminBackupsPage = () => {
                   <td className="whitespace-nowrap px-4 py-3">{formatSize(backup.size)}</td>
                   <td className="whitespace-nowrap px-4 py-3">{backup.createdAt ? new Date(backup.createdAt).toLocaleString() : '—'}</td>
                   <td className="px-4 py-3 text-right">
-                    <Button
-                      onClick={() => void handleDownload(backup.name)}
-                      disabled={downloading === backup.name}
-                      className={ROW_BUTTON_CLASS}
-                    >
-                      {downloading === backup.name ? 'Downloading…' : 'Download'}
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        onClick={() => void handleDownload(backup.name)}
+                        disabled={downloading === backup.name}
+                        className={ROW_BUTTON_CLASS}
+                      >
+                        {downloading === backup.name ? 'Downloading…' : 'Download'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void handleDeleteBackup(backup.name)}
+                        disabled={deleting === backup.name}
+                        className={`${ROW_BUTTON_CLASS} text-red-700 hover:text-ink`}
+                      >
+                        {deleting === backup.name ? 'Deleting…' : 'Delete'}
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}

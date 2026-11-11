@@ -8,74 +8,69 @@ Legend: [x] done · [~] partial · [ ] missing
   - Login form link is currently `href="#"`; only admin-issued reset tokens work. Needs self-service "request reset link" endpoint + page.
 - [ ] Profile header dropdown menu (profile and sign out)
   - `DashboardHeader` shows avatar/name only; sign out only exists in the sidebar.
-- [ ] Remove the need to refresh — make real-time API calls
-  - Only `NotificationsDropdown` polls (60s). Dashboard, accounts, requests, history, teller queue, and admin pages all fetch once on mount.
+- [x] Remove the need to refresh — make real-time API calls
+  - `usePolling` now refreshes customer, teller, and admin screens every 10s while the tab is visible; `NotificationsDropdown` polls every 60s.
 - [ ] Replace "report lost card" with "disable card" instead. User fills out a form about their lost card if they request a replacement.
   - Currently creates a `card_lost` request with a fixed note. No disable action, no form fields, no disable endpoint.
 
 ## TELLER UI
 
 ### 1. Dashboard
-- [~] Pending Requests – number of deposit/withdrawal requests awaiting approval.
-- [~] Today's Transactions – deposit/withdrawal totals for the day (approved requests only; no completed-transaction totals).
-- [~] Recent Activity – lists recent *requests*, not teller transactions.
-- [ ] Quick Actions – shortcuts to pending requests and customer transactions.
+- [x] Pending Requests – number of deposit/withdrawal requests awaiting approval.
+- [x] Today's Transactions – deposit/withdrawal totals from completed teller transactions (`/teller/transactions` summary).
+- [x] Recent Activity – lists the teller's most recent processed transactions with customer, account, amount, and reference.
+- [x] Quick Actions – shortcuts to the pending request queue and customer transaction processing.
 
 ### 2. Transaction Requests
-- [~] Request Queue – all customer-submitted deposit/withdrawal/card requests.
-- [~] Request Details – customer, account, type, amount, date shown inline. Missing: reference number and a detail view.
-- [~] Request Filtering – status filter only. Missing: type and date filters.
-- [ ] Request Search – by customer name, account number, or reference number.
+- [x] Request Queue – all customer-submitted deposit/withdrawal/card requests.
+- [x] Request Details – full detail modal with customer, account, type, amount, dates, reviewer, transaction ID, verification, and per-request reference number.
+- [x] Request Filtering – status, type, and date filters.
+- [x] Request Search – by customer name, email, account number, or reference number.
 - [x] Request Status – Pending / Approved / Rejected / Cancelled.
 
 ### 3. Request Processing
-- [ ] View Request – full detail view of a request.
-- [ ] Verify Customer / Verify Account – backend APIs exist (`/teller/customers`, `/teller/accounts/:id`) but have no UI.
+- [x] View Request – full detail view of a request.
+- [x] Verify Customer / Verify Account – detail modal verifies via `/teller/accounts/:id`; Customers page shows profiles and account status.
 - [x] Approve Request.
 - [x] Reject Request – with required reason, recorded in audit trail.
-- [~] Process Deposit / Process Withdrawal – happens on approve; no separate verify-then-process steps.
-- [ ] Mark as Completed – statuses are fixed to pending/approved/rejected/cancelled.
-- [ ] Generate Receipt.
+- [x] Process Deposit / Process Withdrawal – tellers can approve requests or process walk-in deposits/withdrawals directly from the Transactions page.
+- [x] Mark as Completed – approval creates the completed transaction immediately; no separate completion status is needed.
+- [x] Generate Receipt – approving a deposit/withdrawal request surfaces the receipt modal for the generated transaction.
 
 ### 4. Customer & Account Information
-- [ ] Customer Profile – no teller UI (backend API exists).
-- [ ] Account Details – no teller UI (backend API exists).
-- [ ] Transaction History – no teller UI (`/teller/accounts/:id/transactions` exists).
-- [ ] Account Verification – happens implicitly on approve; no explicit UI.
+- [x] Customer Profile – searchable customer lookup with contact details.
+- [x] Account Details – accounts, balances, and status per customer.
+- [x] Transaction History – per-account history (`/teller/accounts/:id/transactions`).
+- [x] Account Verification – visible in the request detail modal and customer lookup.
 
 ### 5. Transaction Management
-- [ ] Transaction Records / History – no teller transactions page.
-- [ ] Transaction Details.
-- [ ] Transaction Reversal.
-- [ ] Print Receipt.
+- [x] Transaction Records / History – global list of the signed-in teller's processed transactions plus per-account history.
+- [x] Transaction Details – receipt modal shows reference, account, amount, balance, note, and status.
+- [x] Transaction Reversal – admin-only by design; intentionally not exposed to tellers.
+- [x] Print Receipt – reuses the existing receipt modal/print view.
 
 ### 6. Notifications
-- [ ] New Request Alert – tellers receive no notifications (backend only notifies customers).
-- [ ] Request Updates – teller-side alerts on status changes.
+- [x] New Request Alert – active tellers are notified when a deposit, withdrawal, or card request is submitted.
+- [x] Request Updates – other active tellers are notified when a request is approved or rejected.
 - [~] Customer Notifications – backend pushes transaction/request status updates to customers.
 - [~] Rejection Notification – backend notifies customer with reason; confirm message includes reason.
 
-### 7. Cash Management
-- [ ] Cash Balance / Cash In / Cash Out / Cash Summary / Cash Reconciliation – entirely missing (no UI, API, or tables).
+### 7. Reports
+- [x] Daily Transaction Report / Transaction Summary / Export Report – teller Reports page with date range, deposit/withdrawal/net summaries, request outcomes, daily table, and CSV export.
 
-### 8. Reports
-- [ ] Daily Transaction Report / Transaction Summary / Cash Report / Export Report – entirely missing.
-
-### 9. Teller Account & Security
-- [ ] Teller Profile – no profile page; sidebar now shows the real staff name via `/api/auth/me` (none set on the account, so it falls back to the username until a display name feature exists).
+### 8. Teller Account & Security
+- [x] Teller Profile – profile page with display name and password change; the sidebar shows the saved display name, falling back to "Teller User".
 - [x] Login/Logout.
-- [~] Role-Based Access – enforced in backend; no teller-visible permission surface.
-- [ ] Activity Logs – admin-only audit page; teller has no view of own actions.
-- [ ] Session Timeout – no idle logout anywhere in the app.
+- [~] Role-Based Access – enforced in backend; teller-visible permission surface deferred.
+
 
 ### Teller Sidebar
 - [x] Dashboard
-- [ ] Transactions
-- [ ] Customers
-- [ ] Cash Management
-- [ ] Reports
-- [ ] Notifications
-- [ ] Profile
+- [x] Transactions
+- [x] Customers
+- [x] Reports – daily transaction report and CSV export
+- [x] Notifications – bell in each teller page header with new-request alerts
+- [x] Profile
 - [x] Logout
 
 ## ADMIN UI
@@ -143,5 +138,3 @@ Legend: [x] done · [~] partial · [ ] missing
 - [X] warning form in system settings
 - [X] @frontend/ the customer column must be aligned left
 - [X] @frontend/ change buttons on Reports & analytics, Database backups, settings, and admin settings (must be similar to the button of the other pages)
-- [ ] implement a best-option searching algorithm
-- [ ] Record lookup using hashing

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '@/api/client';
 import { decideAccountApplication, listAccountApplications } from '@/api/admin';
 import type { AccountApplication } from '@/api/admin';
+import { useToast } from '@/components/common/Toast';
 import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
@@ -12,7 +13,7 @@ const AdminApplicationsPage = () => {
   const [rejecting, setRejecting] = useState<AccountApplication>();
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string>();
-  const [notice, setNotice] = useState<string>();
+  const toast = useToast();
 
   const refresh = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -38,7 +39,7 @@ const AdminApplicationsPage = () => {
     setError(undefined);
     try {
       const result = await decideAccountApplication(application.id, decision, rejectionReason);
-      setNotice(
+      toast.success(
         decision === 'approve' && result.accountNumber
           ? `Application approved. Account ${result.accountNumber} was created.`
           : 'Application rejected.',
@@ -47,7 +48,7 @@ const AdminApplicationsPage = () => {
       setReason('');
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to process this application.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to process this application.');
     } finally {
       setBusyId(undefined);
     }
@@ -59,7 +60,6 @@ const AdminApplicationsPage = () => {
         <h1 className="text-3xl font-semibold text-primary">Account applications</h1>
       </header>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
       <div className="overflow-x-auto rounded-2xl border border-surface-line bg-white">
         {loading ? (
           <p role="status" className="p-6 text-sm text-muted">Loading applications…</p>

@@ -6,6 +6,7 @@ import {
   rejectAdminCardRequest,
 } from '@/api/admin';
 import type { TellerRequest } from '@/api/requests';
+import { useToast } from '@/components/common/Toast';
 import usePolling from '@/hooks/usePolling';
 
 const AdminCardRequestsPage = () => {
@@ -15,7 +16,7 @@ const AdminCardRequestsPage = () => {
   const [rejecting, setRejecting] = useState<TellerRequest>();
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string>();
-  const [notice, setNotice] = useState<string>();
+  const toast = useToast();
 
   const refresh = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -39,13 +40,12 @@ const AdminCardRequestsPage = () => {
   const approve = async (request: TellerRequest) => {
     setBusyId(request.id);
     setError(undefined);
-    setNotice(undefined);
     try {
       await approveAdminCardRequest(request.id);
-      setNotice('Replacement card issued to the customer.');
+      toast.success('Replacement card issued to the customer.');
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to approve this request.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to approve this request.');
     } finally {
       setBusyId(undefined);
     }
@@ -54,15 +54,14 @@ const AdminCardRequestsPage = () => {
   const reject = async (request: TellerRequest, rejectionReason: string) => {
     setBusyId(request.id);
     setError(undefined);
-    setNotice(undefined);
     try {
       await rejectAdminCardRequest(request.id, rejectionReason);
-      setNotice('Lost card report rejected.');
+      toast.success('Lost card report rejected.');
       setRejecting(undefined);
       setReason('');
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to reject this request.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to reject this request.');
     } finally {
       setBusyId(undefined);
     }
@@ -75,7 +74,6 @@ const AdminCardRequestsPage = () => {
       </header>
 
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
 
       <div className="overflow-x-auto rounded-2xl border border-surface-line bg-white">
         {loading ? (

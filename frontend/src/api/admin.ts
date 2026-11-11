@@ -305,6 +305,17 @@ export const downloadBackup = (name: string): Promise<Blob> =>
 export const generateBackup = (): Promise<{ backups: BackupFile[]; generated: string }> =>
   apiRequest<{ backups: BackupFile[]; generated: string }>('/admin/backups', { method: 'POST' });
 
+export const deleteBackup = (name: string): Promise<{ message: string }> =>
+  apiRequest<{ message: string }>(`/admin/backups/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+
+export const deleteDatabase = (): Promise<{ message: string }> =>
+  apiRequest<{ message: string }>('/admin/backups/delete-database', {
+    method: 'POST',
+    body: { confirm: 'DELETE DATABASE' },
+  });
+
 export const restoreBackup = (name: string): Promise<{ message: string }> =>
   apiRequest<{ message: string }>('/admin/backups/restore', {
     method: 'POST',

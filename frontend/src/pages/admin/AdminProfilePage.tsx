@@ -8,6 +8,7 @@ import { password as passwordValidator } from '@/utils/validation';
 import Button from '@/components/common/Button';
 import Field from '@/components/common/Field';
 import Input from '@/components/common/Input';
+import { useToast } from '@/components/common/Toast';
 
 const InfoRow = ({ label, value }: { label: string; value: string }) => (
   <div className="flex flex-col gap-1">
@@ -21,14 +22,13 @@ const AdminProfilePage = () => {
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingName, setSavingName] = useState(false);
-  const [nameMessage, setNameMessage] = useState<string>();
   const [profileError, setProfileError] = useState<string>();
+  const toast = useToast();
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
-  const [passwordMessage, setPasswordMessage] = useState<string>();
   const [passwordError, setPasswordError] = useState<string>();
 
   useEffect(() => {
@@ -54,14 +54,13 @@ const AdminProfilePage = () => {
     event.preventDefault();
     setSavingName(true);
     setProfileError(undefined);
-    setNameMessage(undefined);
     try {
       const data = await updateAdminProfile(displayName.trim());
       setProfile(data);
       setDisplayName(data.displayName ?? data.name);
-      setNameMessage('Display name saved.');
+      toast.success('Display name saved.');
     } catch (err) {
-      setProfileError(err instanceof ApiError ? err.message : 'Unable to save the display name.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to save the display name.');
     } finally {
       setSavingName(false);
     }
@@ -70,7 +69,6 @@ const AdminProfilePage = () => {
   const handleChangePassword = async (event: FormEvent) => {
     event.preventDefault();
     setPasswordError(undefined);
-    setPasswordMessage(undefined);
 
     if (newPassword !== confirmPassword) {
       setPasswordError('Passwords do not match.');
@@ -85,12 +83,12 @@ const AdminProfilePage = () => {
     setSavingPassword(true);
     try {
       const result = await changePassword({ currentPassword, newPassword });
-      setPasswordMessage(result.message || 'Password updated.');
+      toast.success(result.message || 'Password updated.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err) {
-      setPasswordError(
+      toast.error(
         err instanceof ApiError ? err.message : 'Unable to change the password.',
       );
     } finally {
@@ -135,7 +133,6 @@ const AdminProfilePage = () => {
                 required
               />
             </Field>
-            {nameMessage && <p role="status" className="text-sm text-green-700">{nameMessage}</p>}
             <div className="flex justify-end">
               <Button
                 type="submit"
@@ -196,9 +193,6 @@ const AdminProfilePage = () => {
               />
             </Field>
             {passwordError && <p role="alert" className="text-sm text-red-700">{passwordError}</p>}
-            {passwordMessage && (
-              <p role="status" className="text-sm text-green-700">{passwordMessage}</p>
-            )}
             <div className="flex justify-end">
               <Button
                 type="submit"

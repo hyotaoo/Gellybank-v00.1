@@ -386,6 +386,7 @@ CREATE INDEX idx_password_reset_user
 
 CREATE TABLE transaction_requests (
     request_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    reference_code VARCHAR(40) NOT NULL DEFAULT '',
     customer_id BIGINT UNSIGNED NOT NULL,
     account_id BIGINT UNSIGNED NOT NULL,
     requested_by_user_id BIGINT UNSIGNED NOT NULL,
@@ -419,6 +420,9 @@ CREATE TABLE transaction_requests (
 
 CREATE INDEX idx_tx_requests_status_date
     ON transaction_requests(status, created_at);
+
+CREATE UNIQUE INDEX idx_tx_requests_reference
+    ON transaction_requests(reference_code);
 
 CREATE INDEX idx_tx_requests_customer
     ON transaction_requests(customer_id, status);

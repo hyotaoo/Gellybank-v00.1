@@ -87,6 +87,8 @@ class AdminOperationsTests(unittest.TestCase):
             ("get", "/api/admin/logs"),
             ("get", "/api/admin/backups"),
             ("get", "/api/admin/backups/sample.sql"),
+            ("delete", "/api/admin/backups/sample.sql"),
+            ("post", "/api/admin/backups/delete-database"),
         ]
         for method, path in protected_requests:
             with self.subTest(path=path, method=method):
@@ -135,6 +137,74 @@ class AdminOperationsTests(unittest.TestCase):
                 self.assertEqual(missing.status_code, 404)
             finally:
                 backend.BACKUP_DIR = original_dir
+
+    def test_admin_can_delete_a_backup_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backup_dir = Path(directory)
+            target = backup_dir / "gellybank_db_20260101_000000.sql"
+            target.write_text("SELECT 1;\n")
+            original_dir = backend.BACKUP_DIR
+            backend.BACKUP_DIR = backup_dir
+            try:
+                headers = self.auth_headers(self.admin_token)
+
+                missing = self.client.delete(
+                    "/api/admin/backups/missing.sql", headers=headers
+                )
+                self.assertEqual(missing.status_code, 404)
+
+                traversal = self.client.delete(
+                    "/api/admin/backups/../app.py.sql", headers=headers
+                )
+                self.assertEqual(traversal.status_code, 404)
+
+                deleted = self.client.delete(
+                    f"/api/admin/backups/{target.name}", headers=headers
+                )
+                self.assertEqual(deleted.status_code, 200)
+                self.assertFalse(target.exists())
+
+                with backend.app.app_context():
+                    self.assertEqual(
+                        backend.AuditLog.query.filter_by(action="BACKUP_DELETED").count(),
+                        1,
+                    )
+            finally:
+                backend.BACKUP_DIR = original_dir
+
+    def test_admin_can_delete_the_database(self):
+        headers = self.auth_headers(self.admin_token)
+
+        invalid = self.client.post(
+            "/api/admin/backups/delete-database",
+            headers=headers,
+            json={"confirm": "DELETE"},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(invalid.json["code"], "confirmation_invalid")
+
+        deleted = self.client.post(
+            "/api/admin/backups/delete-database",
+            headers=headers,
+            json={"confirm": "DELETE DATABASE"},
+        )
+        self.assertEqual(deleted.status_code, 200)
+
+        with backend.app.app_context():
+            self.assertEqual(backend.AppUser.query.count(), 1)
+            surviving_admin = backend.db.session.get(backend.AppUser, self.admin.user_id)
+            self.assertEqual(surviving_admin.username, self.admin.username)
+            self.assertEqual(surviving_admin.password_hash, self.admin.password_hash)
+            self.assertEqual(backend.Customer.query.count(), 0)
+            log = backend.AuditLog.query.filter_by(action="DATABASE_DELETED").one()
+            self.assertEqual(log.actor_user_id, self.admin.user_id)
+            self.assertEqual(log.details["username"], self.admin.username)
+
+        # The surviving admin's existing session still works against the wipe.
+        self.assertEqual(
+            self.client.get("/api/admin/dashboard", headers=headers).status_code,
+            200,
+        )
 
     def test_admin_login_returns_distinct_role_and_failed_login_spikes_are_logged(self):
         response = self.client.post(
@@ -670,14 +740,44 @@ class AdminOperationsTests(unittest.TestCase):
                 1,
             )
 
-        # Maintenance mode blocks customers and tellers everywhere but auth.
-        self.assertEqual(
-            self.client.get("/api/accounts", headers=self.auth_headers(self.customer_token)).status_code,
-            503,
-        )
+        # Every customer and teller endpoint stays closed during maintenance,
+        # including customer-only auth actions.
+        customer_headers = self.auth_headers(self.customer_token)
+        blocked_requests = [
+            ("get", "/api/accounts"),
+            ("get", "/api/profile"),
+            ("get", "/api/beneficiaries"),
+            ("get", "/api/cards"),
+            ("get", "/api/notifications"),
+            ("get", "/api/auth/me"),
+            ("post", "/api/auth/register"),
+            ("post", "/api/auth/verify-email"),
+            ("post", "/api/auth/resend-verification"),
+            ("post", "/api/auth/change-password"),
+            ("post", "/api/auth/reset-password"),
+            ("get", "/api/teller/requests"),
+        ]
+        for method, path in blocked_requests:
+            with self.subTest(path=path, method=method):
+                self.assertEqual(
+                    getattr(self.client, method)(path, headers=customer_headers).status_code,
+                    503,
+                )
         self.assertEqual(
             self.client.get("/api/teller/requests", headers=self.auth_headers(self.teller_token)).status_code,
             503,
+        )
+
+        # Customer login is refused, but staff can still sign in.
+        blocked_login = self.client.post(
+            "/api/auth/login",
+            json={"email": "customer@example.com", "password": "customer123"},
+        )
+        self.assertEqual(blocked_login.status_code, 503)
+        self.assertEqual(blocked_login.json["code"], "maintenance")
+        self.assertEqual(
+            self.client.get("/api/auth/me", headers=headers).status_code,
+            200,
         )
         # Admin portal and auth stay reachable.
         self.assertEqual(
@@ -708,6 +808,13 @@ class AdminOperationsTests(unittest.TestCase):
         self.assertEqual(turned_off.status_code, 200)
         self.assertEqual(
             self.client.get("/api/accounts", headers=self.auth_headers(self.customer_token)).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/auth/login",
+                json={"email": "customer@example.com", "password": "customer123"},
+            ).status_code,
             200,
         )
 

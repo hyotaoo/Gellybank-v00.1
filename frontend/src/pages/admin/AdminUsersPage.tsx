@@ -20,6 +20,7 @@ import Field from '@/components/common/Field';
 import Input from '@/components/common/Input';
 import PasswordField from '@/components/auth/PasswordField';
 import Select from '@/components/common/Select';
+import { useToast } from '@/components/common/Toast';
 import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
 
@@ -36,9 +37,9 @@ const AdminUsersPage = () => {
   const [statusFilter, setStatusFilter] = useState<AdminStatus | 'all'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [notice, setNotice] = useState<string>();
   const [resetToken, setResetToken] = useState<string>();
   const [busyId, setBusyId] = useState<string>();
+  const toast = useToast();
 
   const [creating, setCreating] = useState(false);
   const [createEmail, setCreateEmail] = useState('');
@@ -79,8 +80,9 @@ const AdminUsersPage = () => {
       const updated = await updateAdminUser(user.id, update);
       setUsers((current) => current.map((item) => item.id === updated.id ? updated : item));
       if (detail?.id === updated.id) setDetail((current) => current && { ...current, ...updated });
+      toast.success(`${updated.email} was updated.`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to update this user.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to update this user.');
     } finally {
       setBusyId(undefined);
     }
@@ -93,8 +95,9 @@ const AdminUsersPage = () => {
     try {
       const result = await issuePasswordReset(user.id);
       setResetToken(new URL(`/reset-password#token=${encodeURIComponent(result.resetToken)}`, window.location.origin).toString());
+      toast.success(`Password reset link issued for ${user.email}.`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to issue a reset token.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to issue a reset token.');
     } finally {
       setBusyId(undefined);
     }
@@ -104,21 +107,20 @@ const AdminUsersPage = () => {
     event.preventDefault();
     setCreatingUser(true);
     setError(undefined);
-    setNotice(undefined);
     try {
       const created = await createAdminUser({
         email: createEmail.trim(),
         password: createPassword,
         role: createRole,
       });
-      setNotice(`Created an ${createRole} account for ${created.email}.`);
+      toast.success(`Created an ${createRole} account for ${created.email}.`);
       setCreating(false);
       setCreateEmail('');
       setCreatePassword('');
       setCreateRole('teller');
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to create this account.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to create this account.');
     } finally {
       setCreatingUser(false);
     }
@@ -210,7 +212,6 @@ const AdminUsersPage = () => {
       </div>
 
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
       {resetToken && (
         <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-4">
           <p className="font-semibold">One-time password reset link</p>
