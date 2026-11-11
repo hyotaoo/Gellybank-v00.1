@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError } from '@/api/client';
 import { createRequest } from '@/api/requests';
+import type { TransactionRequest } from '@/api/requests';
 import AccountSelect from '@/components/dashboard/AccountSelect';
 import AmountField from '@/components/dashboard/AmountField';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import RequestSubmittedModal from '@/components/dashboard/RequestSubmittedModal';
 import ScrollArea from '@/components/common/ScrollArea';
 import Input from '@/components/common/Input';
 import Button from '@/components/common/Button';
@@ -21,6 +23,7 @@ const WithdrawPage = () => {
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string>();
   const [lastRequested, setLastRequested] = useState<number | null>(null);
+  const [submitted, setSubmitted] = useState<TransactionRequest | null>(null);
 
   useEffect(() => {
     if (!accountId && selectedAccount) setAccountId(selectedAccount.id);
@@ -52,13 +55,14 @@ const WithdrawPage = () => {
     setStatus('loading');
     setMessage(undefined);
     try {
-      await createRequest({
+      const request = await createRequest({
         accountId,
         type: 'withdraw',
         amount: parsedAmount,
         note: note.trim() || undefined,
       });
       await refresh();
+      setSubmitted(request);
       setLastRequested(parsedAmount);
       setStatus('success');
       setMessage(
@@ -69,6 +73,7 @@ const WithdrawPage = () => {
     } catch (err) {
       setStatus('error');
       setLastRequested(null);
+      setSubmitted(null);
       setMessage(err instanceof ApiError ? err.message : 'Withdrawal request failed. Please try again.');
     }
   };
@@ -153,6 +158,9 @@ const WithdrawPage = () => {
           </div>
         </aside>
       </div>
+      {submitted && (
+        <RequestSubmittedModal request={submitted} onClose={() => setSubmitted(null)} />
+      )}
     </DashboardLayout>
   );
 };

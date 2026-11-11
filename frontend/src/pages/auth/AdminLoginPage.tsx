@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { login } from '@/api/auth';
 import { ApiError, setAuthToken } from '@/api/client';
 import EyeIcon from '@/components/icons/EyeIcon';
-import eyeOffIcon from '@/assets/teller/eye-off.svg';
+import EyeOffIcon from '@/components/icons/EyeOffIcon';
 import brandDecorationCircle from '@/assets/teller/brand-decoration-circle-large.svg';
 import { BrandName } from '@/context/BankSettingsContext';
 
@@ -18,10 +18,10 @@ const AdminLoginPage = () => {
 
   return (
     <main className="h-[100dvh] w-full overflow-hidden bg-brand-gradient font-sans text-ink">
-      <div className="relative mx-auto flex h-full w-full max-w-[1440px] flex-col items-center justify-center gap-8 px-5 py-5 sm:px-10 lg:flex-row lg:gap-12 lg:px-12">
+      <div className="relative mx-auto flex h-full w-full max-w-[1440px] flex-col items-center justify-center gap-8 px-5 py-5 sm:px-10 lg:flex-row lg:gap-12 lg:px-12 min-[1440px]:grid min-[1440px]:max-w-none min-[1440px]:grid-cols-[57.57%_1fr] min-[1440px]:gap-0 min-[1440px]:px-0">
         <div
           aria-hidden="true"
-          className="absolute inset-y-0 left-0 hidden w-[829px] bg-[#d9d9d9]/20 min-[1440px]:block"
+          className="absolute inset-y-0 left-0 hidden w-[57.57%] bg-[#d9d9d9]/20 min-[1440px]:block"
         />
 
         <img
@@ -42,7 +42,7 @@ const AdminLoginPage = () => {
         />
 
         {/* Title: top on mobile, right side on desktop */}
-        <div className="relative z-10 w-full text-center text-[44px] font-black leading-[1.2] text-white sm:text-[56px] lg:order-2 lg:w-auto lg:flex-1 lg:text-[64px]">
+        <div className="relative z-10 w-full text-center text-[44px] font-black leading-[1.2] text-white sm:text-[56px] lg:order-2 lg:w-auto lg:flex-1 lg:text-[64px] min-[1440px]:px-12">
           <p>
             <BrandName tailClassName="text-brand-accent" />
           </p>
@@ -51,7 +51,7 @@ const AdminLoginPage = () => {
 
         {/* Form: below title on mobile, left side on desktop */}
         <form
-          className="relative z-10 flex w-full max-w-[623px] flex-col justify-between gap-4 rounded-[36px] bg-surface-card px-6 py-8 sm:px-[54px] sm:py-[35px] lg:order-1 lg:flex-1 min-[1440px]:min-h-[352px]"
+          className="relative z-10 flex w-full max-w-[623px] flex-col justify-between gap-4 rounded-[36px] bg-surface-card px-6 py-8 sm:px-[54px] sm:py-[35px] lg:order-1 lg:flex-1 min-[1440px]:min-h-[352px] min-[1440px]:justify-self-center"
           onSubmit={async (event: FormEvent<HTMLFormElement>) => {
             event.preventDefault();
             setSubmitting(true);
@@ -84,7 +84,7 @@ const AdminLoginPage = () => {
               name="email"
               autoComplete="email"
               placeholder="name@example.com"
-              className="h-[43px] w-full rounded-[36px] border border-transparent bg-[#f8e7b9]/30 px-4 text-[16px] font-medium leading-[1.21] outline-none transition-colors placeholder:text-ink hover:border-primary focus:border-primary-hover"
+              className="h-[43px] w-full rounded-[36px] border border-transparent bg-[#f8e7b9]/30 px-4 text-[16px] font-medium leading-[1.21] outline-none transition-colors placeholder:text-ink/50 hover:border-primary focus:border-primary-hover"
             />
           </label>
 
@@ -99,26 +99,26 @@ const AdminLoginPage = () => {
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="current-password"
                 placeholder="••••••••"
-                className="h-[43px] w-full rounded-[36px] border border-transparent bg-[#f8e7b9]/30 px-4 pr-[56px] text-[16px] font-medium leading-[1.21] outline-none transition-colors placeholder:text-ink hover:border-primary focus:border-primary-hover"
+                className="h-[43px] w-full rounded-[36px] border border-transparent bg-[#f8e7b9]/30 px-4 pr-[56px] text-[16px] font-medium leading-[1.21] outline-none transition-colors placeholder:text-ink/50 hover:border-primary focus:border-primary-hover"
               />
               <button
                 type="button"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
                 aria-pressed={showPassword}
                 onClick={() => setShowPassword((visible) => !visible)}
-                className="absolute right-4 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover"
+                className="absolute right-4 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center text-ink transition-colors hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover"
               >
                 {showPassword ? (
-                  <EyeIcon className="h-[22px] w-[22px]" />
+                  <EyeIcon className="h-[18px] w-[18px]" />
                 ) : (
-                  <img src={eyeOffIcon} width="22" height="22" alt="" />
+                  <EyeOffIcon className="h-[18px] w-[18px]" />
                 )}
               </button>
             </span>
           </label>
 
           {error && (
-            <p role="alert" className="rounded-[16px] bg-red-50 px-4 py-2.5 text-[13px] leading-[1.21] text-red-700">
+            <p role="alert" className="rounded-[16px] bg-red-50 px-4 py-2.5 text-center text-[13px] leading-[1.21] text-red-700">
               {error}
             </p>
           )}

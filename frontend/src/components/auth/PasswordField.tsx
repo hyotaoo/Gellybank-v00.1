@@ -13,6 +13,8 @@ interface PasswordFieldProps {
   error?: string;
   hint?: string;
   required?: boolean;
+  labelClassName?: string;
+  inputClassName?: string;
 }
 
 const PasswordField = ({
@@ -25,12 +27,14 @@ const PasswordField = ({
   error,
   hint,
   required = false,
+  labelClassName = 'text-[14px] font-medium leading-[1.21] text-ink',
+  inputClassName = '',
 }: PasswordFieldProps) => {
   const [show, setShow] = useState(false);
 
   return (
     <label className="flex flex-col gap-2">
-      <span className="text-[14px] font-medium leading-[1.21] text-ink">{label}</span>
+      <span className={labelClassName}>{label}</span>
       <span className="relative block">
         <Input
           type={show ? 'text' : 'password'}
@@ -40,7 +44,7 @@ const PasswordField = ({
           placeholder={placeholder}
           autoComplete={autoComplete}
           required={required}
-          className="pr-[56px]"
+          className={`pr-[56px] ${inputClassName}`}
         />
         <button
           type="button"

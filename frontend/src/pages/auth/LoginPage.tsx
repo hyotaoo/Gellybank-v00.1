@@ -27,7 +27,7 @@ const LoginPage = () => (
             <img src={createAccountPath} width="42.54" height="38.54" alt="" />
           </Link>
           <p className="text-center text-[16px] font-medium leading-none text-ink">
-            Already have an account? <Link to="/login" className="text-primary-hover hover:underline">Sign In</Link>
+            Already have an account? <Link to="/login" className="font-semibold text-white underline">Sign In</Link>
           </p>
         </div>
 
@@ -50,7 +50,7 @@ const LoginPage = () => (
           <span>Create an Account</span>
           <img src={createAccountPath} width="42.54" height="38.54" alt="" />
         </Link>
-        <p className="text-[16px] font-medium leading-none">Already have an account? <Link to="/login" className="text-primary-hover">Sign In</Link></p>
+        <p className="text-[16px] font-medium leading-none">Already have an account? <Link to="/login" className="font-semibold text-white underline">Sign In</Link></p>
       </div>
       <img src={object} className="pointer-events-none absolute -bottom-40 left-1/2 w-[440px] -translate-x-1/2 opacity-90" alt="" />
     </section>

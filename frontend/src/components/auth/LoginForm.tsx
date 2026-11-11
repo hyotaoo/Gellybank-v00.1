@@ -19,6 +19,7 @@ const LoginForm = () => {
   const [error, setError] = useState<string>();
   const [needsVerification, setNeedsVerification] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = location.state as LoginLocationState | null;
@@ -33,6 +34,7 @@ const LoginForm = () => {
         setError(undefined);
         setNotice(undefined);
         setNeedsVerification(false);
+        setShowForgotPassword(false);
         try {
           const response = await login({ email, password });
           if (response.user.role !== 'customer') {
@@ -45,6 +47,9 @@ const LoginForm = () => {
         } catch (err) {
           if (err instanceof ApiError && err.code === 'email_not_verified') {
             setNeedsVerification(true);
+          }
+          if (err instanceof ApiError && err.code === 'invalid_credentials') {
+            setShowForgotPassword(true);
           }
           setError(err instanceof ApiError ? err.message : 'Unable to sign in. Please try again.');
         } finally {
@@ -67,8 +72,42 @@ const LoginForm = () => {
           Password updated. Sign in with your new password.
         </p>
       )}
+
+      <label className="flex flex-col gap-2">
+        <span className="text-[16px] font-bold leading-[1.21] text-ink">Email address</span>
+        <Input
+          type="email"
+          placeholder="name@example.com"
+          autoComplete="email"
+          name="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          required
+          className="text-[16px]"
+        />
+      </label>
+
+      <PasswordField
+        label="Password"
+        name="password"
+        value={password}
+        onChange={setPassword}
+        autoComplete="current-password"
+        required
+        labelClassName="text-[16px] font-bold leading-[1.21] text-ink"
+        inputClassName="text-[16px]"
+      />
+      {showForgotPassword && (
+        <a
+          href="#"
+          className="w-fit text-[14px] font-medium leading-[1.21] text-ink hover:text-primary hover:underline"
+        >
+          Forgot Password
+        </a>
+      )}
+
       {error && (
-        <p role="alert" className="rounded-[16px] bg-red-50 px-4 py-2.5 text-[13px] leading-[1.21] text-red-700">
+        <p role="alert" className="rounded-[16px] bg-red-50 px-4 py-2.5 text-center text-[13px] leading-[1.21] text-red-700">
           {error}
         </p>
       )}
@@ -96,28 +135,6 @@ const LoginForm = () => {
         </p>
       )}
 
-      <label className="flex flex-col gap-2">
-        <span className="text-[14px] font-medium leading-[1.21] text-ink">Email address</span>
-        <Input
-          type="email"
-          placeholder="name@example.com"
-          autoComplete="email"
-          name="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-        />
-      </label>
-
-      <PasswordField
-        label="Password"
-        name="password"
-        value={password}
-        onChange={setPassword}
-        autoComplete="current-password"
-        required
-      />
-
       <Button
         type="submit"
         disabled={submitting}
@@ -126,10 +143,6 @@ const LoginForm = () => {
       >
         {submitting ? 'Signing in…' : 'Sign in'}
       </Button>
-
-      <a href="#" className="w-fit text-[14px] font-medium leading-[1.21] text-ink hover:underline">
-        Forgot Password
-      </a>
     </form>
   );
 };

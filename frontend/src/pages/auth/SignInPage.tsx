@@ -14,6 +14,14 @@ const SignInPage = () => (
         height="390"
         alt=""
       />
+      <img
+        aria-hidden="true"
+        src={brandDecorationCircle}
+        className="pointer-events-none absolute -bottom-[198px] -left-[54px]"
+        width="427"
+        height="390"
+        alt=""
+      />
 
       {/* Heading + form, centered */}
       <section className="relative z-10 flex w-full max-w-[720px] flex-col items-center gap-12">
