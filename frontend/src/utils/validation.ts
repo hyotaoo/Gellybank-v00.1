@@ -10,11 +10,25 @@ export const email = (value: string): string | undefined => {
     : 'Enter a valid email address.';
 };
 
-export const password = (value: string): string | undefined => {
+export const PASSWORD_HINT =
+  'Use 8+ characters with uppercase, lowercase, a number, a special character, and no spaces.';
+
+export const password = (value: string, username?: string): string | undefined => {
   if (!value) return 'Password is required.';
   if (value.length < 8) return 'Password must be at least 8 characters.';
-  if (!/[A-Za-z]/.test(value) || !/\d/.test(value)) {
-    return 'Include at least one letter and one number.';
+  if (/\s/.test(value)) return 'Password cannot contain spaces.';
+  if (!/\p{Lu}/u.test(value)) return 'Password must include an uppercase letter.';
+  if (!/\p{Ll}/u.test(value)) return 'Password must include a lowercase letter.';
+  if (!/\p{Nd}/u.test(value)) return 'Password must include a number.';
+  if (!/[^\p{L}\p{N}\s]/u.test(value)) {
+    return 'Password must include a special character (for example ! @ # $ % & _).';
+  }
+  if (username) {
+    const normalized = username.trim().toLowerCase();
+    const candidate = value.toLowerCase();
+    if (candidate === normalized || candidate === normalized.split('@')[0]) {
+      return 'Password cannot be the same as your email or username.';
+    }
   }
   return undefined;
 };

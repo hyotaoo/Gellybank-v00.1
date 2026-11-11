@@ -49,6 +49,7 @@ CARD_LOST_MIGRATION_FILE = BACKEND / "db" / "migrations" / "010_card_lost_reques
 CUSTOMER_AVATAR_MIGRATION_FILE = BACKEND / "db" / "migrations" / "011_customer_avatar.sql"
 ADMIN_MANAGEMENT_MIGRATION_FILE = BACKEND / "db" / "migrations" / "012_admin_management.sql"
 CUSTOMER_PROFILE_MIGRATION_FILE = BACKEND / "db" / "migrations" / "013_customer_profile_details.sql"
+PASSWORD_HISTORY_MIGRATION_FILE = BACKEND / "db" / "migrations" / "014_password_history.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 BACKUP_SCRIPT = ROOT / "scripts" / "backup_db.sh"
 RESTORE_SCRIPT = ROOT / "scripts" / "restore_db.sh"
@@ -821,6 +822,7 @@ def _run_schema_migrations(connection) -> bool:
             CUSTOMER_AVATAR_MIGRATION_FILE,
             ADMIN_MANAGEMENT_MIGRATION_FILE,
             CUSTOMER_PROFILE_MIGRATION_FILE,
+            PASSWORD_HISTORY_MIGRATION_FILE,
         ):
             if not migration_file.exists():
                 log_line(f"{relative(migration_file)} is missing.")

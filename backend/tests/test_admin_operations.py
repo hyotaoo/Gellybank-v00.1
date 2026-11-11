@@ -300,7 +300,7 @@ class AdminOperationsTests(unittest.TestCase):
         created = self.client.post(
             "/api/admin/users",
             headers=self.auth_headers(self.admin_token),
-            json={"email": "newteller@example.com", "password": "teller123", "role": "teller"},
+            json={"email": "newteller@example.com", "password": "Teller1!Pass", "role": "teller"},
         )
         self.assertEqual(created.status_code, 201)
         self.assertEqual(created.json["role"], "teller")
@@ -310,7 +310,7 @@ class AdminOperationsTests(unittest.TestCase):
         with backend.app.app_context():
             created_user = backend.AppUser.query.filter_by(username="newteller@example.com").one()
             self.assertEqual(created_user.role, "TELLER")
-            self.assertTrue(backend.check_password(created_user.password_hash, "teller123"))
+            self.assertTrue(backend.check_password(created_user.password_hash, "Teller1!Pass"))
             self.assertEqual(
                 backend.AuditLog.query.filter_by(action="USER_CREATED").count(),
                 1,
@@ -319,7 +319,7 @@ class AdminOperationsTests(unittest.TestCase):
         # The new teller can sign in through the normal login flow.
         login = self.client.post(
             "/api/auth/login",
-            json={"email": "newteller@example.com", "password": "teller123"},
+            json={"email": "newteller@example.com", "password": "Teller1!Pass"},
         )
         self.assertEqual(login.status_code, 200)
         self.assertEqual(login.json["user"]["role"], "teller")
@@ -938,7 +938,7 @@ class AdminOperationsTests(unittest.TestCase):
                 400,
             ),
             (
-                {"email": "teller@example.com", "password": "teller123", "role": "teller"},
+                {"email": "teller@example.com", "password": "Teller1!Pass", "role": "teller"},
                 "email_taken",
                 409,
             ),
@@ -1132,18 +1132,18 @@ class AdminOperationsTests(unittest.TestCase):
 
         changed = self.client.post(
             "/api/auth/reset-password",
-            json={"token": token, "password": "changed123"},
+            json={"token": token, "password": "Changed1!Pass"},
         )
         self.assertEqual(changed.status_code, 200)
         replay = self.client.post(
             "/api/auth/reset-password",
-            json={"token": token, "password": "changed456"},
+            json={"token": token, "password": "Changed2!Pass"},
         )
         self.assertEqual(replay.status_code, 400)
 
         login = self.client.post(
             "/api/auth/login",
-            json={"email": "customer@example.com", "password": "changed123"},
+            json={"email": "customer@example.com", "password": "Changed1!Pass"},
         )
         self.assertEqual(login.status_code, 200)
         self.assertEqual(

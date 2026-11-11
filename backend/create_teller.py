@@ -1,6 +1,14 @@
 from getpass import getpass
 
-from app import AppUser, app, db, hash_password, utcnow, validate_password
+from app import (
+    AppUser,
+    app,
+    db,
+    hash_password,
+    record_password_history,
+    utcnow,
+    validate_password,
+)
 
 
 def main():
@@ -8,22 +16,28 @@ def main():
     if "@" not in username or "." not in username:
         raise SystemExit("Enter a valid teller email address.")
 
-    password = getpass("Teller password (8+ characters, including a letter and number): ")
+    password = getpass(
+        "Teller password (8+ characters with uppercase, lowercase, a number, "
+        "a special character, no spaces): "
+    )
     confirmation = getpass("Confirm teller password: ")
     if password != confirmation:
         raise SystemExit("Passwords do not match.")
-    message, code = validate_password(password)
+    message, code = validate_password(password, username)
     if message:
         raise SystemExit(message)
     with app.app_context():
         if AppUser.query.filter_by(username=username).first():
             raise SystemExit("An account with that email already exists.")
-        db.session.add(AppUser(
+        user = AppUser(
             username=username,
             password_hash=hash_password(password),
             role="TELLER",
             email_verified_at=utcnow(),
-        ))
+        )
+        db.session.add(user)
+        db.session.flush()
+        record_password_history(user)
         db.session.commit()
     print("Teller account created.")
 

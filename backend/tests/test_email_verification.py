@@ -13,7 +13,7 @@ REGISTRATION = {
     "firstName": "Riley",
     "lastName": "Rivera",
     "email": "riley@example.com",
-    "password": "rivera123",
+    "password": "Rivera1!Pass",
     "acceptTerms": True,
     "acceptPrivacy": True,
 }
@@ -91,7 +91,7 @@ class EmailVerificationTests(unittest.TestCase):
 
         login = self.client.post(
             "/api/auth/login",
-            json={"email": "riley@example.com", "password": "rivera123"},
+            json={"email": "riley@example.com", "password": "Rivera1!Pass"},
         )
         self.assertEqual(login.status_code, 403)
         self.assertEqual(login.json["code"], "email_not_verified")
@@ -112,7 +112,7 @@ class EmailVerificationTests(unittest.TestCase):
 
         login = self.client.post(
             "/api/auth/login",
-            json={"email": "riley@example.com", "password": "rivera123"},
+            json={"email": "riley@example.com", "password": "Rivera1!Pass"},
         )
         self.assertEqual(login.status_code, 200)
         self.assertTrue(login.json["token"])

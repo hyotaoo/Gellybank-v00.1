@@ -22,6 +22,7 @@ import PasswordField from '@/components/auth/PasswordField';
 import Select from '@/components/common/Select';
 import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
+import { PASSWORD_HINT } from '@/utils/validation';
 
 const ROLES: (AdminRole | 'all')[] = ['all', 'customer', 'teller', 'admin'];
 const STATUSES: (AdminStatus | 'all')[] = ['all', 'active', 'suspended'];
@@ -316,7 +317,7 @@ const AdminUsersPage = () => {
                   autoComplete="new-password"
                 />
                 <p className="mt-2 text-[12px] leading-[1.21] text-muted">
-                  8+ characters with at least one letter and one number. The user can change it after signing in.
+                  {PASSWORD_HINT} The user can change it after signing in.
                 </p>
               </div>
               <Field label="Role">

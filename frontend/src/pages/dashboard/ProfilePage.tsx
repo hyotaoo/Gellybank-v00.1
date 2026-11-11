@@ -17,7 +17,7 @@ import Field from '@/components/common/Field';
 import Input from '@/components/common/Input';
 import Textarea from '@/components/common/Textarea';
 import PasswordField from '@/components/auth/PasswordField';
-import { confirmMatch, name, optionalName, password } from '@/utils/validation';
+import { PASSWORD_HINT, confirmMatch, name, optionalName, password } from '@/utils/validation';
 
 interface PersonalState {
   firstName: string;
@@ -244,7 +244,7 @@ const ProfilePage = () => {
 
     const nextErrors: Partial<PasswordState> = {
       currentPassword: passwords.currentPassword ? undefined : 'Current password is required.',
-      newPassword: password(passwords.newPassword),
+      newPassword: password(passwords.newPassword, profile?.email),
       confirmPassword: confirmMatch(passwords.newPassword)(passwords.confirmPassword),
     };
     setPasswordErrors(nextErrors);
@@ -582,6 +582,7 @@ const ProfilePage = () => {
                   }}
                   autoComplete="new-password"
                   error={passwordErrors.newPassword}
+                  hint={PASSWORD_HINT}
                 />
                 <PasswordField
                   label="Confirm new password"

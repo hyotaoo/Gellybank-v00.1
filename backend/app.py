@@ -61,6 +61,9 @@ CONSENT_VERSION = "v1.0, 2026-11-03"
 DEMO_EMAIL = "demo@gellybank.com"
 DEMO_PASSWORD = "demo12345"
 
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_HISTORY_LIMIT = 5
+
 BACKUP_DIR = Path(__file__).resolve().parent.parent / "backups"
 
 # In-memory brute force protection for login attempts
@@ -690,6 +693,17 @@ class PasswordResetToken(db.Model):
     created_at = db.Column(db.DateTime, default=utcnow)
 
 
+class PasswordHistory(db.Model):
+    __tablename__ = "password_history"
+
+    history_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
+    user_id = db.Column(
+        db.BigInteger, db.ForeignKey("app_users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    password_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+
 class EmailVerificationToken(db.Model):
     __tablename__ = "email_verification_tokens"
 
@@ -1004,7 +1018,7 @@ def admin_create_user():
     if "@" not in email or "." not in email:
         return error("Enter a valid email address.", 400, "invalid_email")
     password = str(data.get("password") or "")
-    message, code = validate_password(password)
+    message, code = validate_password(password, email)
     if message:
         return error(message, 400, code)
     if (
@@ -1020,6 +1034,8 @@ def admin_create_user():
         email_verified_at=utcnow(),
     )
     db.session.add(user)
+    db.session.flush()
+    record_password_history(user)
     actor = authenticated_user()
     log_audit(
         "USER_CREATED",
@@ -3199,11 +3215,69 @@ def mark_all_notifications_read():
 
 
 
-def validate_password(password):
+def _username_matches_password(password, username):
+    if not username:
+        return False
+    candidate = password.casefold()
+    normalized = username.strip().casefold()
+    return candidate == normalized or candidate == normalized.split("@", 1)[0]
+
+
+def validate_password(password, username=None):
     """Return (message, code) when a password is weak, or (None, None) when valid."""
-    if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
-        return "Password needs 8+ characters with a letter and a number.", "weak_password"
+    if len(password) < PASSWORD_MIN_LENGTH:
+        return f"Password must be at least {PASSWORD_MIN_LENGTH} characters.", "weak_password"
+    if any(ch.isspace() for ch in password):
+        return "Password cannot contain spaces.", "weak_password"
+    if not any(ch.isupper() for ch in password):
+        return "Password must include an uppercase letter.", "weak_password"
+    if not any(ch.islower() for ch in password):
+        return "Password must include a lowercase letter.", "weak_password"
+    if not any(ch.isdigit() for ch in password):
+        return "Password must include a number.", "weak_password"
+    if not any(not ch.isalnum() and not ch.isspace() for ch in password):
+        return (
+            "Password must include a special character (for example ! @ # $ % & _).",
+            "weak_password",
+        )
+    if _username_matches_password(password, username):
+        return "Password cannot be the same as your email or username.", "weak_password"
     return None, None
+
+
+def check_password_reuse(password, user):
+    """Return (message, code) when a password was used recently, or (None, None)."""
+    if user is None:
+        return None, None
+    hashes = [user.password_hash]
+    history = (
+        PasswordHistory.query.filter_by(user_id=user.user_id)
+        .order_by(PasswordHistory.created_at.desc(), PasswordHistory.history_id.desc())
+        .limit(PASSWORD_HISTORY_LIMIT)
+        .all()
+    )
+    hashes.extend(row.password_hash for row in history)
+    seen = set()
+    for stored in hashes:
+        if not stored or stored in seen:
+            continue
+        seen.add(stored)
+        if check_password(stored, password):
+            return "Password cannot match one of your recent passwords.", "weak_password"
+    return None, None
+
+
+def record_password_history(user):
+    db.session.add(PasswordHistory(user_id=user.user_id, password_hash=user.password_hash))
+    db.session.flush()
+    stale = (
+        PasswordHistory.query.filter_by(user_id=user.user_id)
+        .order_by(PasswordHistory.created_at.desc(), PasswordHistory.history_id.desc())
+        .offset(PASSWORD_HISTORY_LIMIT)
+        .all()
+    )
+    for row in stale:
+        db.session.delete(row)
 
 
 def parse_date(value):
@@ -3271,7 +3345,7 @@ def register():
 
     if "@" not in email or "." not in email:
         return error("Enter a valid email address.", 400, "invalid_email")
-    message, code = validate_password(password)
+    message, code = validate_password(password, email)
     if message:
         return error(message, 400, code)
     if not data.get("acceptTerms"):
@@ -3328,6 +3402,7 @@ def register():
     )
     db.session.add(user)
     db.session.flush()
+    record_password_history(user)
 
     code = issue_verification_code(user)
     try:
@@ -3639,12 +3714,16 @@ def change_password():
 
     if not check_password(user.password_hash, current_password):
         return error("Your current password is incorrect.", 401, "wrong_password")
-    message, code = validate_password(new_password)
+    message, code = validate_password(new_password, user.username)
+    if message:
+        return error(message, 400, code)
+    message, code = check_password_reuse(new_password, user)
     if message:
         return error(message, 400, code)
 
     user.password_hash = hash_password(new_password)
     user.auth_token_version += 1
+    record_password_history(user)
     log_audit(
         "PASSWORD_CHANGED",
         "APP_USER",
@@ -3660,9 +3739,6 @@ def reset_password():
     data = body()
     token = str(data.get("token") or "")
     password = str(data.get("password") or "")
-    message, code = validate_password(password)
-    if message:
-        return error(message, 400, code)
 
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     reset = PasswordResetToken.query.filter_by(token_hash=token_hash).with_for_update().first()
@@ -3673,8 +3749,16 @@ def reset_password():
     if not user or not user.is_active:
         return error("This password reset link is invalid or expired.", 400, "invalid_reset_token")
 
+    message, code = validate_password(password, user.username)
+    if message:
+        return error(message, 400, code)
+    message, code = check_password_reuse(password, user)
+    if message:
+        return error(message, 400, code)
+
     user.password_hash = hash_password(password)
     user.auth_token_version += 1
+    record_password_history(user)
     db.session.delete(reset)
     log_audit(
         "PASSWORD_RESET_COMPLETED",

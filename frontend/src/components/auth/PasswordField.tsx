@@ -11,6 +11,7 @@ interface PasswordFieldProps {
   placeholder?: string;
   autoComplete?: string;
   error?: string;
+  hint?: string;
   required?: boolean;
 }
 
@@ -22,6 +23,7 @@ const PasswordField = ({
   placeholder = '••••••••',
   autoComplete = 'new-password',
   error,
+  hint,
   required = false,
 }: PasswordFieldProps) => {
   const [show, setShow] = useState(false);
@@ -51,6 +53,7 @@ const PasswordField = ({
         </button>
       </span>
       {error && <span className="text-[12px] leading-[1.21] text-red-600">{error}</span>}
+      {!error && hint && <span className="text-[12px] leading-[1.21] text-muted">{hint}</span>}
     </label>
   );
 };

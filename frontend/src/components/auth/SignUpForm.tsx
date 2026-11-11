@@ -13,6 +13,7 @@ import {
   validatePhone,
 } from '@/utils/countries';
 import {
+  PASSWORD_HINT,
   amount,
   confirmMatch,
   email,
@@ -178,7 +179,7 @@ const validateField = (field: FieldKey, values: FormState): string | undefined =
     case 'purposeOfAccount':
       return required('Purpose of account')(values.purposeOfAccount);
     case 'password':
-      return password(values.password);
+      return password(values.password, values.email);
     case 'confirmPassword':
       return confirmMatch(values.password)(values.confirmPassword);
     case 'acceptTerms':
@@ -565,6 +566,7 @@ const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) =>
             onChange={(value) => update('password', value)}
             autoComplete="new-password"
             error={errors.password}
+            hint={PASSWORD_HINT}
           />
 
           <PasswordField
