@@ -105,7 +105,7 @@ class AdminOperationsTests(unittest.TestCase):
     def test_admin_can_list_and_download_backups(self):
         with tempfile.TemporaryDirectory() as directory:
             backup_dir = Path(directory)
-            (backup_dir / "gellybank_db_20260101_000000.sql").write_text("SELECT 1;\n")
+            (backup_dir / "gellybank_db_20260101_000000.sql").write_bytes(b"SELECT 1;\n")
             original_dir = backend.BACKUP_DIR
             backend.BACKUP_DIR = backup_dir
             try:
@@ -129,6 +129,7 @@ class AdminOperationsTests(unittest.TestCase):
                     "attachment",
                     downloaded.headers["Content-Disposition"],
                 )
+                downloaded.close()
 
                 missing = self.client.get(
                     "/api/admin/backups/../app.py",

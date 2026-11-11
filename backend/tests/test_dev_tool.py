@@ -62,8 +62,9 @@ class DevToolTests(unittest.TestCase):
         process = Mock()
         with patch.object(dev, "port_in_use", return_value=False), patch.object(
             dev, "venv_exists", return_value=True
-        ), patch.object(dev, "venv_python", return_value=Path("/tmp/venv/python")), patch.object(
-            dev, "BACKEND_PORT", 5402
+        ), patch.object(dev, "ensure_packages", return_value=True), patch.object(
+            dev, "venv_python", return_value=Path("/tmp/venv/python")
+        ), patch.object(dev, "BACKEND_PORT", 5402
         ), patch.object(dev.subprocess, "Popen", return_value=process) as popen, patch.object(
             dev, "pump_output"
         ):
