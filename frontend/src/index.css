@@ -130,3 +130,36 @@
     min-height: 100vh;
   }
 }
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Pink scrollbar thumb, matching the sign-up card rail, inside the customer dashboard. */
+.customer-shell::-webkit-scrollbar,
+.customer-shell *::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.customer-shell::-webkit-scrollbar-track,
+.customer-shell *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.customer-shell::-webkit-scrollbar-thumb,
+.customer-shell *::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: #d987a3;
+}
+
+.customer-shell::-webkit-scrollbar-thumb:hover,
+.customer-shell *::-webkit-scrollbar-thumb:hover {
+  background-color: #bd5980;
+}

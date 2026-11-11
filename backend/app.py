@@ -61,6 +61,9 @@ CONSENT_VERSION = "v1.0, 2026-11-03"
 DEMO_EMAIL = "demo@gellybank.com"
 DEMO_PASSWORD = "demo12345"
 
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_HISTORY_LIMIT = 5
+
 BACKUP_DIR = Path(__file__).resolve().parent.parent / "backups"
 
 # In-memory brute force protection for login attempts
@@ -292,6 +295,17 @@ class Customer(db.Model):
     email = db.Column(db.String(254), nullable=False, unique=True)
     phone = db.Column(db.String(20))
     address = db.Column(db.String(255))
+    city = db.Column(db.String(100))
+    state_region = db.Column(db.String(100))
+    postal_code = db.Column(db.String(10))
+    mailing_same_as_residential = db.Column(db.Boolean, nullable=False, default=False)
+    civil_status = db.Column(db.String(20))
+    suffix = db.Column(db.String(10))
+    employment_status = db.Column(db.String(30))
+    occupation = db.Column(db.String(100))
+    employer_name = db.Column(db.String(150))
+    annual_gross_income = db.Column(db.Numeric(14, 2))
+    account_ownership_type = db.Column(db.String(30))
     avatar = db.Column(db.Text().with_variant(MEDIUMTEXT(), "mysql"))
     status = db.Column(db.String(20), nullable=False, default="ACTIVE")
     terms_accepted_at = db.Column(db.DateTime)
@@ -696,6 +710,17 @@ class PasswordResetToken(db.Model):
     created_at = db.Column(db.DateTime, default=utcnow)
 
 
+class PasswordHistory(db.Model):
+    __tablename__ = "password_history"
+
+    history_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
+    user_id = db.Column(
+        db.BigInteger, db.ForeignKey("app_users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    password_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+
 class EmailVerificationToken(db.Model):
     __tablename__ = "email_verification_tokens"
 
@@ -1033,7 +1058,7 @@ def admin_create_user():
     if "@" not in email or "." not in email:
         return error("Enter a valid email address.", 400, "invalid_email")
     password = str(data.get("password") or "")
-    message, code = validate_password(password)
+    message, code = validate_password(password, email)
     if message:
         return error(message, 400, code)
     if (
@@ -1049,6 +1074,8 @@ def admin_create_user():
         email_verified_at=utcnow(),
     )
     db.session.add(user)
+    db.session.flush()
+    record_password_history(user)
     actor = authenticated_user()
     log_audit(
         "USER_CREATED",
@@ -3597,16 +3624,83 @@ def mark_all_notifications_read():
 
 
 
-def validate_password(password):
+def _username_matches_password(password, username):
+    if not username:
+        return False
+    candidate = password.casefold()
+    normalized = username.strip().casefold()
+    return candidate == normalized or candidate == normalized.split("@", 1)[0]
+
+
+def validate_password(password, username=None):
     """Return (message, code) when a password is weak, or (None, None) when valid."""
-    if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
-        return "Password needs 8+ characters with a letter and a number.", "weak_password"
+    if len(password) < PASSWORD_MIN_LENGTH:
+        return f"Password must be at least {PASSWORD_MIN_LENGTH} characters.", "weak_password"
+    if any(ch.isspace() for ch in password):
+        return "Password cannot contain spaces.", "weak_password"
+    if not any(ch.isupper() for ch in password):
+        return "Password must include an uppercase letter.", "weak_password"
+    if not any(ch.islower() for ch in password):
+        return "Password must include a lowercase letter.", "weak_password"
+    if not any(ch.isdigit() for ch in password):
+        return "Password must include a number.", "weak_password"
+    if not any(not ch.isalnum() and not ch.isspace() for ch in password):
+        return (
+            "Password must include a special character (for example ! @ # $ % & _).",
+            "weak_password",
+        )
+    if _username_matches_password(password, username):
+        return "Password cannot be the same as your email or username.", "weak_password"
     return None, None
+
+
+def check_password_reuse(password, user):
+    """Return (message, code) when a password was used recently, or (None, None)."""
+    if user is None:
+        return None, None
+    hashes = [user.password_hash]
+    history = (
+        PasswordHistory.query.filter_by(user_id=user.user_id)
+        .order_by(PasswordHistory.created_at.desc(), PasswordHistory.history_id.desc())
+        .limit(PASSWORD_HISTORY_LIMIT)
+        .all()
+    )
+    hashes.extend(row.password_hash for row in history)
+    seen = set()
+    for stored in hashes:
+        if not stored or stored in seen:
+            continue
+        seen.add(stored)
+        if check_password(stored, password):
+            return "Password cannot match one of your recent passwords.", "weak_password"
+    return None, None
+
+
+def record_password_history(user):
+    db.session.add(PasswordHistory(user_id=user.user_id, password_hash=user.password_hash))
+    db.session.flush()
+    stale = (
+        PasswordHistory.query.filter_by(user_id=user.user_id)
+        .order_by(PasswordHistory.created_at.desc(), PasswordHistory.history_id.desc())
+        .offset(PASSWORD_HISTORY_LIMIT)
+        .all()
+    )
+    for row in stale:
+        db.session.delete(row)
 
 
 def parse_date(value):
     try:
         return datetime.strptime(str(value), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_amount(value):
+    if value in (None, ""):
+        return None
+    try:
+        return to_money(value)
     except (TypeError, ValueError):
         return None
 
@@ -3660,7 +3754,7 @@ def register():
 
     if "@" not in email or "." not in email:
         return error("Enter a valid email address.", 400, "invalid_email")
-    message, code = validate_password(password)
+    message, code = validate_password(password, email)
     if message:
         return error(message, 400, code)
     if not data.get("acceptTerms"):
@@ -3691,6 +3785,17 @@ def register():
         email=email,
         phone=join_phone(data.get("countryCode"), data.get("phone")),
         address=(data.get("address") or "").strip() or None,
+        city=(data.get("city") or "").strip()[:100] or None,
+        state_region=(data.get("stateRegion") or "").strip()[:100] or None,
+        postal_code=(data.get("postalCode") or "").strip()[:10] or None,
+        mailing_same_as_residential=bool(data.get("mailingSameAsResidential")),
+        civil_status=(data.get("civilStatus") or "").strip()[:20] or None,
+        suffix=(data.get("suffix") or "").strip()[:10] or None,
+        employment_status=(data.get("employmentStatus") or "").strip()[:30] or None,
+        occupation=(data.get("occupation") or "").strip()[:100] or None,
+        employer_name=(data.get("employerName") or "").strip()[:150] or None,
+        annual_gross_income=parse_amount(data.get("annualGrossIncome")),
+        account_ownership_type=(data.get("accountOwnershipType") or "").strip()[:30] or None,
         terms_accepted_at=accepted_at,
         privacy_accepted_at=accepted_at,
         consent_version=CONSENT_VERSION,
@@ -3706,6 +3811,7 @@ def register():
     )
     db.session.add(user)
     db.session.flush()
+    record_password_history(user)
 
     code = issue_verification_code(user)
     try:
@@ -3902,6 +4008,21 @@ def get_profile():
         "email": customer.email,
         "phone": customer.phone,
         "address": customer.address,
+        "suffix": customer.suffix,
+        "civilStatus": customer.civil_status,
+        "city": customer.city,
+        "stateRegion": customer.state_region,
+        "postalCode": customer.postal_code,
+        "mailingSameAsResidential": customer.mailing_same_as_residential,
+        "employmentStatus": customer.employment_status,
+        "occupation": customer.occupation,
+        "employerName": customer.employer_name,
+        "annualGrossIncome": (
+            float(customer.annual_gross_income)
+            if customer.annual_gross_income is not None
+            else None
+        ),
+        "accountOwnershipType": customer.account_ownership_type,
         "avatar": customer.avatar,
         "emailVerified": user.email_verified_at is not None,
         "customerStatus": customer.status,
@@ -3973,6 +4094,21 @@ def update_profile():
         "email": customer.email,
         "phone": customer.phone,
         "address": customer.address,
+        "suffix": customer.suffix,
+        "civilStatus": customer.civil_status,
+        "city": customer.city,
+        "stateRegion": customer.state_region,
+        "postalCode": customer.postal_code,
+        "mailingSameAsResidential": customer.mailing_same_as_residential,
+        "employmentStatus": customer.employment_status,
+        "occupation": customer.occupation,
+        "employerName": customer.employer_name,
+        "annualGrossIncome": (
+            float(customer.annual_gross_income)
+            if customer.annual_gross_income is not None
+            else None
+        ),
+        "accountOwnershipType": customer.account_ownership_type,
         "avatar": customer.avatar,
         "emailVerified": user.email_verified_at is not None,
         "customerStatus": customer.status,
@@ -3990,12 +4126,16 @@ def change_password():
 
     if not check_password(user.password_hash, current_password):
         return error("Your current password is incorrect.", 401, "wrong_password")
-    message, code = validate_password(new_password)
+    message, code = validate_password(new_password, user.username)
+    if message:
+        return error(message, 400, code)
+    message, code = check_password_reuse(new_password, user)
     if message:
         return error(message, 400, code)
 
     user.password_hash = hash_password(new_password)
     user.auth_token_version += 1
+    record_password_history(user)
     log_audit(
         "PASSWORD_CHANGED",
         "APP_USER",
@@ -4011,9 +4151,6 @@ def reset_password():
     data = body()
     token = str(data.get("token") or "")
     password = str(data.get("password") or "")
-    message, code = validate_password(password)
-    if message:
-        return error(message, 400, code)
 
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     reset = PasswordResetToken.query.filter_by(token_hash=token_hash).with_for_update().first()
@@ -4024,8 +4161,16 @@ def reset_password():
     if not user or not user.is_active:
         return error("This password reset link is invalid or expired.", 400, "invalid_reset_token")
 
+    message, code = validate_password(password, user.username)
+    if message:
+        return error(message, 400, code)
+    message, code = check_password_reuse(password, user)
+    if message:
+        return error(message, 400, code)
+
     user.password_hash = hash_password(password)
     user.auth_token_version += 1
+    record_password_history(user)
     db.session.delete(reset)
     log_audit(
         "PASSWORD_RESET_COMPLETED",

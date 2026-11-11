@@ -4,7 +4,7 @@ import { ApiError } from '@/api/client';
 import { changePassword } from '@/api/auth';
 import { getAdminProfile, updateAdminProfile } from '@/api/admin';
 import type { AdminProfile } from '@/api/admin';
-import { password as passwordValidator } from '@/utils/validation';
+import { PASSWORD_HINT, password as passwordValidator } from '@/utils/validation';
 import Button from '@/components/common/Button';
 import Field from '@/components/common/Field';
 import Input from '@/components/common/Input';
@@ -74,7 +74,7 @@ const AdminProfilePage = () => {
       setPasswordError('Passwords do not match.');
       return;
     }
-    const validationError = passwordValidator(newPassword);
+    const validationError = passwordValidator(newPassword, profile?.email);
     if (validationError) {
       setPasswordError(validationError);
       return;
@@ -183,6 +183,7 @@ const AdminProfilePage = () => {
                 required
               />
             </Field>
+            <p className="text-[12px] leading-[1.21] text-muted">{PASSWORD_HINT}</p>
             <Field label="Confirm new password">
               <Input
                 type="password"

@@ -23,6 +23,17 @@ CREATE TABLE customers (
     email VARCHAR(254) NOT NULL UNIQUE,
     phone VARCHAR(20) NULL,
     address VARCHAR(255) NULL,
+    city VARCHAR(100) NULL,
+    state_region VARCHAR(100) NULL,
+    postal_code VARCHAR(10) NULL,
+    mailing_same_as_residential BOOLEAN NOT NULL DEFAULT FALSE,
+    civil_status VARCHAR(20) NULL,
+    suffix VARCHAR(10) NULL,
+    employment_status VARCHAR(30) NULL,
+    occupation VARCHAR(100) NULL,
+    employer_name VARCHAR(150) NULL,
+    annual_gross_income DECIMAL(14, 2) NULL,
+    account_ownership_type VARCHAR(30) NULL,
     avatar MEDIUMTEXT NULL,
 
     status ENUM('ACTIVE', 'INACTIVE')
@@ -378,6 +389,24 @@ CREATE TABLE password_reset_tokens (
 
 CREATE INDEX idx_password_reset_user
     ON password_reset_tokens(user_id);
+
+
+-- ============================================================
+-- TABLE 11B: PASSWORD HISTORY
+-- ============================================================
+
+CREATE TABLE password_history (
+    history_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_password_history_user
+        FOREIGN KEY (user_id) REFERENCES app_users(user_id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_password_history_user
+    ON password_history(user_id, created_at);
 
 
 -- ============================================================

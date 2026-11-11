@@ -1,4 +1,4 @@
--- 014: Reference numbers for customer transaction requests.
+-- 015: Reference numbers for customer transaction requests.
 
 ALTER TABLE transaction_requests
     ADD COLUMN reference_code VARCHAR(40) NOT NULL DEFAULT '' AFTER request_id;

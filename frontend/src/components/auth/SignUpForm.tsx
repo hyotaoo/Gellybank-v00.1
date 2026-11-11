@@ -1,11 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import Button from '@/components/common/Button';
 import Field from '@/components/common/Field';
 import Input from '@/components/common/Input';
 import Select from '@/components/common/Select';
-import Textarea from '@/components/common/Textarea';
 import PasswordField from '@/components/auth/PasswordField';
 import PhoneField from '@/components/auth/PhoneField';
 import {
@@ -13,19 +12,45 @@ import {
   findCountry,
   validatePhone,
 } from '@/utils/countries';
-import { confirmMatch, email, makeBirthdate, name, optionalName, password, required } from '@/utils/validation';
+import {
+  PASSWORD_HINT,
+  amount,
+  confirmMatch,
+  email,
+  makeBirthdate,
+  name,
+  optionalName,
+  optionalShortName,
+  password,
+  postalCode,
+  required,
+  sanitizeAmount,
+  sanitizeName,
+} from '@/utils/validation';
+import { loadSignUpDraft, saveSignUpDraft } from '@/utils/signupDraft';
 
 export interface SignUpDetails {
   firstName: string;
   middleName: string;
   lastName: string;
+  suffix: string;
   birthdate: string;
+  civilStatus: string;
+  address: string;
+  city: string;
+  stateRegion: string;
+  postalCode: string;
+  mailingSameAsResidential: boolean;
   email: string;
   countryCode: string;
   phone: string;
-  address: string;
+  employmentStatus: string;
+  occupation: string;
+  employerName: string;
+  annualGrossIncome: string;
   sourceOfFunds: string;
   accountType: 'savings' | 'checking';
+  accountOwnershipType: string;
   purposeOfAccount: string;
   password: string;
   acceptTerms: boolean;
@@ -37,6 +62,27 @@ interface FormState extends SignUpDetails {
 }
 
 type FieldKey = keyof FormState;
+
+const CIVIL_STATUS_OPTIONS = [
+  'Single',
+  'Married',
+  'Widowed',
+  'Separated',
+  'Annulled',
+  'Divorced',
+];
+
+const EMPLOYMENT_STATUS_OPTIONS = [
+  'Employed',
+  'Self-employed',
+  'Unemployed',
+  'Retired',
+  'Student',
+];
+
+const EMPLOYERS_REQUIRED = ['Employed', 'Self-employed'];
+
+const OWNERSHIP_OPTIONS = ['Individual', 'Joint'];
 
 const SOURCE_OPTIONS = [
   'Employment income',
@@ -63,13 +109,24 @@ const emptyValues = (): FormState => ({
   firstName: '',
   middleName: '',
   lastName: '',
+  suffix: '',
   birthdate: '',
+  civilStatus: '',
+  address: '',
+  city: '',
+  stateRegion: '',
+  postalCode: '',
+  mailingSameAsResidential: false,
   email: '',
   countryCode: DEFAULT_COUNTRY_CODE,
   phone: '',
-  address: '',
+  employmentStatus: '',
+  occupation: '',
+  employerName: '',
+  annualGrossIncome: '',
   sourceOfFunds: '',
   accountType: 'savings',
+  accountOwnershipType: '',
   purposeOfAccount: '',
   password: '',
   confirmPassword: '',
@@ -85,14 +142,36 @@ const validateField = (field: FieldKey, values: FormState): string | undefined =
       return optionalName('Middle name')(values.middleName);
     case 'lastName':
       return name('Last name')(values.lastName);
+    case 'suffix':
+      return optionalShortName('Suffix')(values.suffix);
     case 'birthdate':
       return makeBirthdate()(values.birthdate);
+    case 'civilStatus':
+      return required('Civil status')(values.civilStatus);
     case 'email':
       return email(values.email);
     case 'phone':
       return validatePhone(findCountry(values.countryCode), values.phone);
     case 'address':
       return required('Address')(values.address);
+    case 'city':
+      return name('City')(values.city);
+    case 'stateRegion':
+      return name('State / Province / Region')(values.stateRegion);
+    case 'postalCode':
+      return postalCode(values.postalCode);
+    case 'employmentStatus':
+      return required('Employment status')(values.employmentStatus);
+    case 'occupation':
+      return required('Occupation / Job title')(values.occupation);
+    case 'employerName':
+      return EMPLOYERS_REQUIRED.includes(values.employmentStatus)
+        ? required('Employer name')(values.employerName)
+        : undefined;
+    case 'annualGrossIncome':
+      return amount('Annual gross income')(values.annualGrossIncome);
+    case 'accountOwnershipType':
+      return required('Account ownership type')(values.accountOwnershipType);
     case 'sourceOfFunds':
       return required('Source of funds')(values.sourceOfFunds);
     case 'accountType':
@@ -100,7 +179,7 @@ const validateField = (field: FieldKey, values: FormState): string | undefined =
     case 'purposeOfAccount':
       return required('Purpose of account')(values.purposeOfAccount);
     case 'password':
-      return password(values.password);
+      return password(values.password, values.email);
     case 'confirmPassword':
       return confirmMatch(values.password)(values.confirmPassword);
     case 'acceptTerms':
@@ -120,15 +199,38 @@ const ALL_FIELDS = Object.keys(emptyValues()) as FieldKey[];
 
 const STEPS: Array<{ title: string; fields: FieldKey[] }> = [
   {
-    title: 'Personal information',
-    fields: ['firstName', 'middleName', 'lastName', 'birthdate', 'email', 'phone', 'address'],
+    title: 'Personal',
+    fields: [
+      'firstName',
+      'middleName',
+      'lastName',
+      'suffix',
+      'birthdate',
+      'civilStatus',
+      'address',
+      'city',
+      'stateRegion',
+      'postalCode',
+      'mailingSameAsResidential',
+      'email',
+      'phone',
+    ],
   },
   {
-    title: 'Financial information',
-    fields: ['sourceOfFunds', 'accountType', 'purposeOfAccount'],
+    title: 'Financial',
+    fields: [
+      'employmentStatus',
+      'occupation',
+      'employerName',
+      'annualGrossIncome',
+      'sourceOfFunds',
+      'accountType',
+      'accountOwnershipType',
+      'purposeOfAccount',
+    ],
   },
   {
-    title: 'Security',
+    title: 'Terms',
     fields: ['password', 'confirmPassword', 'acceptTerms', 'acceptPrivacy'],
   },
 ];
@@ -139,18 +241,17 @@ interface SignUpFormProps {
   submitting?: boolean;
 }
 
-const SectionTitle = ({ children }: { children: string }) => (
-  <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-primary">
-    {children}
-  </h2>
-);
-
 const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) => {
-  const [values, setValues] = useState<FormState>(emptyValues);
+  const [draft] = useState(() => loadSignUpDraft(emptyValues(), STEPS.length));
+  const [values, setValues] = useState<FormState>(() => draft?.values ?? emptyValues());
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({});
-  const [stepIndex, setStepIndex] = useState(0);
+  const [stepIndex, setStepIndex] = useState(() => draft?.stepIndex ?? 0);
   const today = new Date().toISOString().slice(0, 10);
   const isLastStep = stepIndex === STEPS.length - 1;
+
+  useEffect(() => {
+    saveSignUpDraft(values, stepIndex);
+  }, [values, stepIndex]);
 
   const update = <K extends FieldKey>(field: K, value: FormState[K]) => {
     setValues((previous) => ({ ...previous, [field]: value }));
@@ -191,57 +292,67 @@ const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) =>
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
-      <h1 className="text-[28px] font-bold leading-[1.21] text-ink">Sign Up</h1>
+      <h1 className="text-center text-[28px] font-bold leading-[1.21] text-ink">Sign Up</h1>
 
-      <div className="flex flex-col gap-2">
-        <span className="text-[12px] font-medium leading-[1.21] text-muted">
-          Step {stepIndex + 1} of {STEPS.length}
-        </span>
-        <div className="flex gap-2" aria-hidden="true">
-          {STEPS.map((step, index) => (
-            <span
-              key={step.title}
-              className={`h-1.5 flex-1 rounded-full ${
-                index <= stepIndex ? 'bg-primary' : 'bg-surface-line'
-              }`}
-            />
-          ))}
-        </div>
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        {STEPS.map((step, index) => (
+          <span
+            key={step.title}
+            className={`flex items-center justify-center gap-2 whitespace-nowrap rounded-full border px-2.5 py-1.5 text-[11px] font-semibold leading-[14px] sm:px-3 sm:text-[12px] ${
+              index === stepIndex
+                ? 'border-primary bg-primary text-surface-card'
+                : 'border-surface-line text-muted'
+            }`}
+          >
+            <span>{index + 1}</span>
+            <span>{step.title}</span>
+          </span>
+        ))}
       </div>
 
-      <SectionTitle>{STEPS[stepIndex].title}</SectionTitle>
-
       {stepIndex === 0 && (
-        <>
-          <Field label="First Name" error={errors.firstName}>
-            <Input
-              value={values.firstName}
-              onChange={(event) => update('firstName', event.target.value)}
-              onBlur={() => validateOne('firstName')}
-              placeholder="Juan"
-              autoComplete="given-name"
-            />
-          </Field>
+        <div className="flex flex-col gap-2">
+          <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            <Field label="First Name" error={errors.firstName}>
+              <Input
+                value={values.firstName}
+                onChange={(event) => update('firstName', sanitizeName(event.target.value))}
+                onBlur={() => validateOne('firstName')}
+                placeholder="Juan"
+                autoComplete="given-name"
+              />
+            </Field>
 
-          <Field label="Middle Name (Optional)" error={errors.middleName}>
-            <Input
-              value={values.middleName}
-              onChange={(event) => update('middleName', event.target.value)}
-              onBlur={() => validateOne('middleName')}
-              placeholder="Santos"
-              autoComplete="additional-name"
-            />
-          </Field>
+            <Field label="Middle Name (Optional)" error={errors.middleName}>
+              <Input
+                value={values.middleName}
+                onChange={(event) => update('middleName', sanitizeName(event.target.value))}
+                onBlur={() => validateOne('middleName')}
+                placeholder="Santos"
+                autoComplete="additional-name"
+              />
+            </Field>
 
-          <Field label="Last Name" error={errors.lastName}>
-            <Input
-              value={values.lastName}
-              onChange={(event) => update('lastName', event.target.value)}
-              onBlur={() => validateOne('lastName')}
-              placeholder="Dela Cruz"
-              autoComplete="family-name"
-            />
-          </Field>
+            <Field label="Last Name" error={errors.lastName}>
+              <Input
+                value={values.lastName}
+                onChange={(event) => update('lastName', sanitizeName(event.target.value))}
+                onBlur={() => validateOne('lastName')}
+                placeholder="Dela Cruz"
+                autoComplete="family-name"
+              />
+            </Field>
+
+            <Field label="Suffix (Optional)" error={errors.suffix}>
+              <Input
+                value={values.suffix}
+                onChange={(event) => update('suffix', sanitizeName(event.target.value).slice(0, 10))}
+                onBlur={() => validateOne('suffix')}
+                placeholder="Jr."
+                autoComplete="honorific-suffix"
+              />
+            </Field>
+          </div>
 
           <Field label="Birthdate" error={errors.birthdate}>
             <Input
@@ -253,92 +364,209 @@ const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) =>
             />
           </Field>
 
-          <Field label="Email address" error={errors.email}>
-            <Input
-              type="email"
-              value={values.email}
-              onChange={(event) => update('email', event.target.value)}
-              onBlur={() => validateOne('email')}
-              placeholder="name@example.com"
-              autoComplete="email"
-            />
+          <Field label="Civil Status" error={errors.civilStatus}>
+            <Select
+              value={values.civilStatus}
+              onChange={(event) => update('civilStatus', event.target.value)}
+              onBlur={() => validateOne('civilStatus')}
+            >
+              <option value="">Select civil status</option>
+              {CIVIL_STATUS_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </Select>
           </Field>
 
-          <PhoneField
-            countryCode={values.countryCode}
-            number={values.phone}
-            onCountryChange={(code) => {
-              update('countryCode', code);
-              setErrors((previous) => ({ ...previous, phone: undefined }));
-            }}
-            onNumberChange={(value) => update('phone', value)}
-            error={errors.phone}
-          />
-
-          <Field label="Home address" error={errors.address}>
-            <Textarea
+          <Field label="Address" error={errors.address}>
+            <Input
               value={values.address}
               onChange={(event) => update('address', event.target.value)}
               onBlur={() => validateOne('address')}
-              placeholder="Street, Barangay, City, Province, Postal code"
-              autoComplete="street-address"
+              placeholder="Street, Barangay, Building"
+              autoComplete="address-line1"
             />
           </Field>
-        </>
+
+          <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            <Field label="City" error={errors.city}>
+              <Input
+                value={values.city}
+                onChange={(event) => update('city', sanitizeName(event.target.value))}
+                onBlur={() => validateOne('city')}
+                placeholder="Quezon City"
+                autoComplete="address-level2"
+              />
+            </Field>
+
+            <Field label="State / Province / Region" error={errors.stateRegion}>
+              <Input
+                value={values.stateRegion}
+                onChange={(event) => update('stateRegion', sanitizeName(event.target.value))}
+                onBlur={() => validateOne('stateRegion')}
+                placeholder="Metro Manila"
+                autoComplete="address-level1"
+              />
+            </Field>
+          </div>
+
+          <Field label="ZIP / Postal Code" error={errors.postalCode}>
+            <Input
+              value={values.postalCode}
+              onChange={(event) =>
+                update('postalCode', event.target.value.replace(/\D/g, '').slice(0, 4))
+              }
+              onBlur={() => validateOne('postalCode')}
+              placeholder="1100"
+              inputMode="numeric"
+              autoComplete="postal-code"
+            />
+          </Field>
+
+          <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            <Field label="Email address" error={errors.email}>
+              <Input
+                type="email"
+                value={values.email}
+                onChange={(event) => update('email', event.target.value)}
+                onBlur={() => validateOne('email')}
+                placeholder="name@example.com"
+                autoComplete="email"
+              />
+            </Field>
+
+            <PhoneField
+              number={values.phone}
+              onNumberChange={(value) => update('phone', value)}
+              error={errors.phone}
+            />
+          </div>
+        </div>
       )}
 
       {stepIndex === 1 && (
-        <>
-          <Field label="Source of funds" error={errors.sourceOfFunds}>
-            <Select
-              value={values.sourceOfFunds}
-              onChange={(event) => update('sourceOfFunds', event.target.value)}
-              onBlur={() => validateOne('sourceOfFunds')}
-            >
-              <option value="">Select source of funds</option>
-              {SOURCE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </Select>
+        <div className="flex flex-col gap-2">
+          <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            <Field label="Employment Status" error={errors.employmentStatus}>
+              <Select
+                value={values.employmentStatus}
+                onChange={(event) => {
+                  update('employmentStatus', event.target.value);
+                  setErrors((previous) => ({ ...previous, employerName: undefined }));
+                }}
+                onBlur={() => validateOne('employmentStatus')}
+              >
+                <option value="">Select employment status</option>
+                {EMPLOYMENT_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field label="Occupation / Job Title" error={errors.occupation}>
+              <Input
+                value={values.occupation}
+                onChange={(event) => update('occupation', event.target.value)}
+                onBlur={() => validateOne('occupation')}
+                placeholder="Software Developer"
+                autoComplete="organization-title"
+              />
+            </Field>
+          </div>
+
+          <Field label="Employer Name (required if employed)" error={errors.employerName}>
+            <Input
+              value={values.employerName}
+              onChange={(event) => update('employerName', event.target.value)}
+              onBlur={() => validateOne('employerName')}
+              placeholder="Gelly Bank"
+              autoComplete="organization"
+            />
           </Field>
 
-          <Field label="Account type" error={errors.accountType}>
-            <Select
-              value={values.accountType}
-              onChange={(event) => update('accountType', event.target.value as SignUpDetails['accountType'])}
-            >
-              <option value="savings">Savings</option>
-              <option value="checking">Checking</option>
-            </Select>
+          <Field label="Annual Gross Income" error={errors.annualGrossIncome}>
+            <Input
+              value={values.annualGrossIncome}
+              onChange={(event) => update('annualGrossIncome', sanitizeAmount(event.target.value))}
+              onBlur={() => validateOne('annualGrossIncome')}
+              placeholder="0.00"
+              inputMode="decimal"
+            />
           </Field>
 
-          <Field label="Purpose of account" error={errors.purposeOfAccount}>
-            <Select
-              value={values.purposeOfAccount}
-              onChange={(event) => update('purposeOfAccount', event.target.value)}
-              onBlur={() => validateOne('purposeOfAccount')}
-            >
-              <option value="">Select purpose of account</option>
-              {PURPOSE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </>
+          <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            <Field label="Source of funds" error={errors.sourceOfFunds}>
+              <Select
+                value={values.sourceOfFunds}
+                onChange={(event) => update('sourceOfFunds', event.target.value)}
+                onBlur={() => validateOne('sourceOfFunds')}
+              >
+                <option value="">Select source of funds</option>
+                {SOURCE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field label="Account type" error={errors.accountType}>
+              <Select
+                value={values.accountType}
+                onChange={(event) => update('accountType', event.target.value as SignUpDetails['accountType'])}
+              >
+                <option value="savings">Savings</option>
+                <option value="checking">Checking</option>
+              </Select>
+            </Field>
+          </div>
+
+          <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            <Field label="Account Ownership Type" error={errors.accountOwnershipType}>
+              <Select
+                value={values.accountOwnershipType}
+                onChange={(event) => update('accountOwnershipType', event.target.value)}
+                onBlur={() => validateOne('accountOwnershipType')}
+              >
+                <option value="">Select ownership type</option>
+                {OWNERSHIP_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field label="Purpose of account" error={errors.purposeOfAccount}>
+              <Select
+                value={values.purposeOfAccount}
+                onChange={(event) => update('purposeOfAccount', event.target.value)}
+                onBlur={() => validateOne('purposeOfAccount')}
+              >
+                <option value="">Select purpose of account</option>
+                {PURPOSE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        </div>
       )}
 
       {stepIndex === 2 && (
-        <>
+        <div className="flex flex-col gap-2">
           <PasswordField
             label="Create Password"
             value={values.password}
             onChange={(value) => update('password', value)}
             autoComplete="new-password"
             error={errors.password}
+            hint={PASSWORD_HINT}
           />
 
           <PasswordField
@@ -361,8 +589,6 @@ const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) =>
               and agree to the Gelly Bank{' '}
               <Link
                 to="/terms"
-                target="_blank"
-                rel="noopener noreferrer"
                 className="font-semibold text-primary hover:underline"
               >
                 Terms of Agreement
@@ -382,8 +608,6 @@ const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) =>
               <span className="font-semibold">Required.</span> I have read the{' '}
               <Link
                 to="/privacy"
-                target="_blank"
-                rel="noopener noreferrer"
                 className="font-semibold text-primary hover:underline"
               >
                 Data Privacy Notice
@@ -399,7 +623,7 @@ const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) =>
               {errors.acceptTerms ?? errors.acceptPrivacy}
             </span>
           )}
-        </>
+        </div>
       )}
 
       {error && (
@@ -415,12 +639,12 @@ const SignUpForm = ({ onSubmit, error, submitting = false }: SignUpFormProps) =>
         {stepIndex > 0 && (
           <Button
             type="button"
-            variant="secondary"
+            variant="primary"
             disabled={submitting}
             onClick={() => setStepIndex(stepIndex - 1)}
             className="h-[56px] flex-1 justify-center text-[17px] font-semibold"
           >
-            Back
+            Previous
           </Button>
         )}
         <Button

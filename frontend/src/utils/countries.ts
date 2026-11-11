@@ -9,7 +9,7 @@ export interface Country {
 }
 
 export const COUNTRIES: Country[] = [
-  { code: 'PH', name: 'Philippines', dial: '+63', flag: '🇵🇭', min: 9, max: 11, example: '9171234567' },
+  { code: 'PH', name: 'Philippines', dial: '+63', flag: '🇵🇭', min: 9, max: 10, example: '9171234567' },
   { code: 'US', name: 'United States', dial: '+1', flag: '🇺🇸', min: 10, max: 10, example: '2025550123' },
   { code: 'CA', name: 'Canada', dial: '+1', flag: '🇨🇦', min: 10, max: 10, example: '4165550123' },
   { code: 'GB', name: 'United Kingdom', dial: '+44', flag: '🇬🇧', min: 9, max: 10, example: '7400123456' },

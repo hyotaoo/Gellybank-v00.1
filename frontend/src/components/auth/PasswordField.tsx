@@ -11,6 +11,7 @@ interface PasswordFieldProps {
   placeholder?: string;
   autoComplete?: string;
   error?: string;
+  hint?: string;
   required?: boolean;
 }
 
@@ -22,6 +23,7 @@ const PasswordField = ({
   placeholder = '••••••••',
   autoComplete = 'new-password',
   error,
+  hint,
   required = false,
 }: PasswordFieldProps) => {
   const [show, setShow] = useState(false);
@@ -45,12 +47,13 @@ const PasswordField = ({
           aria-label={show ? 'Hide password' : 'Show password'}
           aria-pressed={show}
           onClick={() => setShow((visible) => !visible)}
-          className="absolute right-4 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-transparent bg-white text-ink transition-colors hover:border-primary hover:bg-surface-card focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover"
+          className="absolute right-4 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center text-ink transition-colors hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-hover"
         >
           {show ? <EyeIcon className="h-[18px] w-[18px]" /> : <EyeOffIcon className="h-[18px] w-[18px]" />}
         </button>
       </span>
       {error && <span className="text-[12px] leading-[1.21] text-red-600">{error}</span>}
+      {!error && hint && <span className="text-[12px] leading-[1.21] text-muted">{hint}</span>}
     </label>
   );
 };

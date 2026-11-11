@@ -6,7 +6,7 @@ import { resetPassword } from '@/api/auth';
 import Button from '@/components/common/Button';
 import Input from '@/components/common/Input';
 import PasswordField from '@/components/auth/PasswordField';
-import { password as passwordValidator } from '@/utils/validation';
+import { PASSWORD_HINT, password as passwordValidator } from '@/utils/validation';
 
 const ResetPasswordPage = () => {
   const [searchParams] = useSearchParams();
@@ -51,7 +51,7 @@ const ResetPasswordPage = () => {
         <h1 className="text-2xl font-bold">Reset password</h1>
         {!token && <p role="alert" className="text-sm text-red-700">The reset link is missing its token.</p>}
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-        <PasswordField label="New password" value={password} onChange={setPassword} autoComplete="new-password" required />
+        <PasswordField label="New password" value={password} onChange={setPassword} autoComplete="new-password" hint={PASSWORD_HINT} required />
         <label className="flex flex-col gap-2">
           <span className="text-sm font-medium">Confirm new password</span>
           <Input

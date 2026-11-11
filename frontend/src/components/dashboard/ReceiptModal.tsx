@@ -3,6 +3,7 @@ import type { Account } from '@/api/accounts';
 import type { Transaction } from '@/api/transactions';
 import Button from '@/components/common/Button';
 import CopyButton from '@/components/common/CopyButton';
+import ScrollArea from '@/components/common/ScrollArea';
 import CircleCheckIcon from '@/components/icons/CircleCheckIcon';
 import { formatAccountNumber, formatCurrency, formatDateTime } from '@/utils/format';
 import {
@@ -82,8 +83,15 @@ const ReceiptModal = ({ transaction, account, onClose }: ReceiptModalProps) => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="receipt-title"
-        className="max-h-[92dvh] w-full max-w-[440px] overflow-y-auto rounded-t-[28px] bg-white p-6 shadow-2xl sm:rounded-[28px] sm:p-8"
+        className="max-h-[92dvh] w-full max-w-[440px]"
       >
+        <ScrollArea
+          className="max-h-[92dvh] rounded-t-[28px] bg-white shadow-2xl sm:rounded-[28px]"
+          contentClassName="p-6 sm:p-8"
+          trackInsetTop={16}
+          trackInsetBottom={16}
+          hideRail
+        >
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-surface-card text-primary">
@@ -166,6 +174,7 @@ const ReceiptModal = ({ transaction, account, onClose }: ReceiptModalProps) => {
             Print / Save PDF
           </Button>
         </div>
+        </ScrollArea>
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import LoginForm from '@/components/auth/LoginForm';
 import LoginIllustration from '@/components/auth/LoginIllustration';
 import brandDecorationCircle from '@/assets/teller/brand-decoration-circle-large.svg';
@@ -19,7 +20,15 @@ const SignInPage = () => (
         <h1 className="text-center text-[52px] font-black leading-none text-white sm:text-[64px]">
           <span className="text-white/60">Welcome</span> Back!
         </h1>
-        <LoginForm />
+        <div className="flex w-full flex-col items-center gap-4">
+          <LoginForm />
+          <p className="w-full text-center text-[14px] font-medium leading-[1.21] text-ink">
+            Don&apos;t have an account?{' '}
+            <Link to="/signup" className="font-semibold text-white underline">
+              Create account
+            </Link>
+          </p>
+        </div>
       </section>
 
       {/* Illustration, centered below the form */}

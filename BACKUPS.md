@@ -11,7 +11,7 @@ chmod +x scripts/backup_db.sh
 ```
 
 You can also run this from the developer tool menu (`python dev.py`) with
-option 14 (back up) or 15 (restore), which calls the same scripts.
+option 10 (back up / restore), which calls the same scripts.
 
 The script reads `DATABASE_URL` from `backend/.env`, dumps the database with
 `mysqldump` (with `--single-transaction`, so it is consistent without locking

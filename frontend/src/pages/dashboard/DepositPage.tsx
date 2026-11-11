@@ -5,6 +5,7 @@ import { createRequest } from '@/api/requests';
 import AccountSelect from '@/components/dashboard/AccountSelect';
 import AmountField from '@/components/dashboard/AmountField';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import ScrollArea from '@/components/common/ScrollArea';
 import Input from '@/components/common/Input';
 import Button from '@/components/common/Button';
 import { useAccounts } from '@/context/AccountContext';
@@ -67,8 +68,14 @@ const DepositPage = () => {
       <div className="flex flex-1 flex-col gap-6 pb-2 lg:flex-row lg:overflow-hidden">
         <form
           onSubmit={handleSubmit}
-          className="flex flex-1 flex-col gap-5 rounded-[28px] border border-surface-line bg-surface-soft p-5 sm:p-8 lg:overflow-y-auto"
+          className="flex flex-1 flex-col rounded-[28px] border border-surface-line bg-surface-soft lg:min-h-0"
         >
+          <ScrollArea
+            wrapperClassName="flex min-h-0 flex-1 flex-col"
+            contentClassName="flex flex-col gap-5 p-5 sm:p-8"
+            trackInsetTop={16}
+            trackInsetBottom={16}
+          >
           <div className="rounded-[16px] bg-[rgba(248,231,185,0.45)] px-4 py-3 text-[13px] leading-[1.4] text-ink">
             Deposits are processed at the teller. Submitting this form sends a request to the
             teller dashboard for approval — your balance updates once it is approved.
@@ -109,6 +116,7 @@ const DepositPage = () => {
               </span>
             )}
           </div>
+          </ScrollArea>
         </form>
 
         <aside className="flex w-full flex-none flex-col gap-5 rounded-[28px] bg-[rgba(248,231,185,0.32)] p-5 sm:p-8 lg:w-[350px]">

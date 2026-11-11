@@ -3,6 +3,7 @@ import { ApiError } from '@/api/client';
 import { cancelRequest, listMyRequests } from '@/api/requests';
 import type { RequestStatus, TransactionRequest } from '@/api/requests';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import RequestDetailModal from '@/components/dashboard/RequestDetailModal';
 import Button from '@/components/common/Button';
 import usePolling from '@/hooks/usePolling';
 import { formatCurrency } from '@/utils/format';
@@ -37,6 +38,7 @@ const RequestsPage = () => {
   const [busyId, setBusyId] = useState<string>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [selected, setSelected] = useState<TransactionRequest | null>(null);
 
   const refresh = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -120,7 +122,19 @@ const RequestsPage = () => {
               </thead>
               <tbody className="divide-y divide-surface-line">
                 {requests.map((request) => (
-                  <tr key={request.id}>
+                  <tr
+                    key={request.id}
+                    tabIndex={0}
+                    title="View request details"
+                    onClick={() => setSelected(request)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelected(request);
+                      }
+                    }}
+                    className="cursor-pointer transition-colors hover:bg-surface-soft focus:outline-none focus-visible:bg-surface-soft"
+                  >
                     <td className="px-5 py-4 text-sm">
                       <span className="block font-semibold">{request.accountLabel ?? 'Account'}</span>
                       <span className="text-xs text-muted">{request.accountNumber}</span>
@@ -145,7 +159,11 @@ const RequestsPage = () => {
                         <span className="mt-1 block text-xs text-red-700">Reason: {request.rejectionReason}</span>
                       )}
                     </td>
-                    <td className="px-5 py-4 text-right">
+                    <td
+                      className="px-5 py-4 text-right"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
                       {request.status === 'pending' && (
                         <Button
                           type="button"
@@ -171,6 +189,8 @@ const RequestsPage = () => {
             </table>
           )}
         </div>
+
+        {selected && <RequestDetailModal request={selected} onClose={() => setSelected(null)} />}
       </section>
     </DashboardLayout>
   );
