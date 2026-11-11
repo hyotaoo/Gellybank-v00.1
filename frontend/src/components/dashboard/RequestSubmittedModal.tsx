@@ -15,10 +15,14 @@ interface RequestSubmittedModalProps {
 const typeLabel: Record<string, string> = {
   deposit: 'Deposit',
   withdrawal: 'Withdrawal',
+  card: 'Card replacement',
+  card_lost: 'Lost card',
 };
 
 const RequestSubmittedModal = ({ request, onClose }: RequestSubmittedModalProps) => {
   const navigate = useNavigate();
+  const isLost = request.type === 'card_lost';
+  const isCardRequest = isLost || request.type === 'card';
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -92,12 +96,25 @@ const RequestSubmittedModal = ({ request, onClose }: RequestSubmittedModalProps)
           </div>
 
           <div className="mt-7 text-center">
-            <p className="text-[34px] font-extrabold leading-[1.1] tracking-tight text-ink">
-              {formatCurrency(request.amount, request.currency)}
-            </p>
-            <p className="mt-2 text-[12px] leading-[1.21] text-muted">
-              {typeLabel[request.type] ?? request.type} · awaiting teller approval
-            </p>
+            {isCardRequest ? (
+              <>
+                <p className="text-[28px] font-extrabold leading-[1.1] tracking-tight text-ink">
+                  {isLost ? 'Lost card report' : 'Card replacement'}
+                </p>
+                <p className="mt-2 text-[12px] leading-[1.21] text-muted">
+                  {isLost ? 'awaiting administrator review' : 'awaiting teller approval'}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-[34px] font-extrabold leading-[1.1] tracking-tight text-ink">
+                  {formatCurrency(request.amount, request.currency)}
+                </p>
+                <p className="mt-2 text-[12px] leading-[1.21] text-muted">
+                  {typeLabel[request.type] ?? request.type} · awaiting teller approval
+                </p>
+              </>
+            )}
           </div>
 
           <div className="mt-6 border-t border-dashed border-ink/15 pt-2">
@@ -118,7 +135,11 @@ const RequestSubmittedModal = ({ request, onClose }: RequestSubmittedModalProps)
           </div>
 
           <p className="mt-5 text-center text-[11px] leading-[1.5] text-muted">
-            A teller will review this request. Your balance updates once it is approved.
+            {isLost
+              ? 'An administrator will review this report. Your card will be blocked and a replacement issued once it is approved.'
+              : isCardRequest
+                ? 'A teller will review this request. Your new card will be available once it is approved.'
+                : 'A teller will review this request. Your balance updates once it is approved.'}
           </p>
 
           <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">

@@ -8,7 +8,9 @@ import type { BankCard } from '@/api/cards';
 import { getProfile, updateProfile } from '@/api/profile';
 import type { Profile } from '@/api/profile';
 import { createRequest } from '@/api/requests';
+import type { TransactionRequest } from '@/api/requests';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import RequestSubmittedModal from '@/components/dashboard/RequestSubmittedModal';
 import ScrollArea from '@/components/common/ScrollArea';
 import Button from '@/components/common/Button';
 import CustomerAvatar from '@/components/common/CustomerAvatar';
@@ -83,6 +85,7 @@ const ProfilePage = () => {
   const [debitCard, setDebitCard] = useState<BankCard | null>(null);
   const [cardsLoading, setCardsLoading] = useState(true);
   const [cardBusyId, setCardBusyId] = useState<string>();
+  const [submitted, setSubmitted] = useState<TransactionRequest | null>(null);
 
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<string>();
@@ -270,12 +273,12 @@ const ProfilePage = () => {
     setError(undefined);
     setCardBusyId(card.id);
     try {
-      await createRequest({
+      const request = await createRequest({
         accountId: card.accountId,
         type: 'card',
         note: 'Expired card replacement',
       });
-      setNotice('Expired card replacement request sent to the teller for approval.');
+      setSubmitted(request);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to request a replacement card.');
     } finally {
@@ -288,12 +291,12 @@ const ProfilePage = () => {
     setError(undefined);
     setCardBusyId(card.id);
     try {
-      await createRequest({
+      const request = await createRequest({
         accountId: card.accountId,
         type: 'card_lost',
         note: 'Lost card reported',
       });
-      setNotice('Lost card report sent to the administrator.');
+      setSubmitted(request);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to report this card as lost.');
     } finally {
@@ -620,6 +623,9 @@ const ProfilePage = () => {
           onCancel={() => setCropFile(null)}
           onSave={(dataUrl) => void handleCroppedAvatar(dataUrl)}
         />
+      )}
+      {submitted && (
+        <RequestSubmittedModal request={submitted} onClose={() => setSubmitted(null)} />
       )}
     </DashboardLayout>
   );
