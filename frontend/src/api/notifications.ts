@@ -1,4 +1,5 @@
 import { apiRequest } from '@/api/client';
+import type { TokenScope } from '@/api/client';
 
 export type NotificationCategory = 'transaction' | 'request' | 'card' | 'system';
 
@@ -18,13 +19,20 @@ export interface NotificationList {
   items: NotificationItem[];
 }
 
-export const listNotifications = (signal?: AbortSignal): Promise<NotificationList> =>
-  apiRequest<NotificationList>('/notifications', { signal });
+export const listNotifications = (
+  signal?: AbortSignal,
+  scope?: TokenScope,
+): Promise<NotificationList> =>
+  apiRequest<NotificationList>('/notifications', { signal, authScope: scope });
 
-export const markNotificationRead = (id: string): Promise<NotificationItem> =>
+export const markNotificationRead = (
+  id: string,
+  scope?: TokenScope,
+): Promise<NotificationItem> =>
   apiRequest<NotificationItem>(`/notifications/${encodeURIComponent(id)}/read`, {
     method: 'POST',
+    authScope: scope,
   });
 
-export const markAllNotificationsRead = (): Promise<{ updated: number }> =>
-  apiRequest<{ updated: number }>('/notifications/read-all', { method: 'POST' });
+export const markAllNotificationsRead = (scope?: TokenScope): Promise<{ updated: number }> =>
+  apiRequest<{ updated: number }>('/notifications/read-all', { method: 'POST', authScope: scope });

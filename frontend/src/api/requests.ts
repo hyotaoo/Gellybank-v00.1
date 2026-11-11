@@ -1,10 +1,13 @@
 import { apiRequest } from '@/api/client';
+import type { Account } from '@/api/accounts';
+import type { Transaction } from '@/api/transactions';
 
 export type RequestType = 'deposit' | 'withdrawal' | 'card' | 'card_lost';
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface TransactionRequest {
   id: string;
+  reference: string;
   accountId: string;
   accountNumber: string | null;
   accountLabel: string | null;
@@ -24,6 +27,16 @@ export interface TellerRequest extends TransactionRequest {
   customerId: string;
   customerName: string;
   customerEmail: string;
+  transaction?: Transaction;
+  account?: Account;
+}
+
+export interface TellerRequestFilters {
+  status?: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all';
+  type?: 'deposit' | 'withdrawal' | 'card';
+  search?: string;
+  from?: string;
+  to?: string;
 }
 
 export interface CreateRequestInput {
@@ -48,10 +61,17 @@ export const cancelRequest = (id: string): Promise<void> =>
   apiRequest<void>(`/requests/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
 export const listTellerRequests = (
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all' = 'pending',
+  filters: TellerRequestFilters = {},
   signal?: AbortSignal,
-): Promise<TellerRequest[]> =>
-  apiRequest<TellerRequest[]>(`/teller/requests?status=${status}`, { signal });
+): Promise<TellerRequest[]> => {
+  const query = new URLSearchParams();
+  query.set('status', filters.status ?? 'pending');
+  if (filters.type) query.set('type', filters.type);
+  if (filters.search?.trim()) query.set('search', filters.search.trim());
+  if (filters.from) query.set('from', filters.from);
+  if (filters.to) query.set('to', filters.to);
+  return apiRequest<TellerRequest[]>(`/teller/requests?${query.toString()}`, { signal });
+};
 
 export const approveTellerRequest = (id: string): Promise<TellerRequest> =>
   apiRequest<TellerRequest>(`/teller/requests/${encodeURIComponent(id)}/approve`, {

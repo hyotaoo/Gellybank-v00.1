@@ -124,6 +124,10 @@ def new_reference():
     return "TXN-" + uuid4().hex[:10].upper()
 
 
+def new_request_reference():
+    return "REQ-" + uuid4().hex[:10].upper()
+
+
 def new_account_number():
     return str(uuid4().int)[:12].zfill(12)
 
@@ -522,6 +526,15 @@ def notification_user_id(customer_id):
     return user.user_id if user else None
 
 
+def notify_tellers(title, message, link="/teller/requests", exclude_user_id=None):
+    """Queue a notification for every active teller."""
+    tellers = AppUser.query.filter_by(role="TELLER", is_active=True).all()
+    for teller in tellers:
+        if exclude_user_id is not None and teller.user_id == exclude_user_id:
+            continue
+        push_notification(teller.user_id, title, message, category="REQUEST", link=link)
+
+
 class BankCard(db.Model):
     __tablename__ = "bank_cards"
 
@@ -627,6 +640,9 @@ class TransactionRequest(db.Model):
     __tablename__ = "transaction_requests"
 
     request_id = db.Column(ID_TYPE, primary_key=True, autoincrement=True)
+    reference_code = db.Column(
+        db.String(40), nullable=False, unique=True, default=new_request_reference
+    )
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.customer_id"), nullable=False)
     account_id = db.Column(db.BigInteger, db.ForeignKey("bank_accounts.account_id"), nullable=False)
     requested_by_user_id = db.Column(
@@ -660,6 +676,7 @@ class TransactionRequest(db.Model):
         )
         data = {
             "id": str(self.request_id),
+            "reference": self.reference_code,
             "accountId": str(self.account_id),
             "accountNumber": account.account_number if account else None,
             "accountLabel": account.type_name.capitalize() if account else None,
@@ -779,22 +796,45 @@ def bank_settings():
     return setting
 
 
-MAINTENANCE_EXEMPT_PREFIXES = ("/api/settings", "/api/health", "/api/auth/", "/api/admin/")
+MAINTENANCE_ALLOWED_PATHS = ("/api/settings", "/api/health")
+MAINTENANCE_ALLOWED_PREFIXES = ("/api/admin/",)
+
+
+def maintenance_mode_enabled():
+    try:
+        settings_row = db.session.get(BankSetting, 1)
+    except SQLAlchemyError:
+        return False
+    return bool(settings_row and settings_row.maintenance_mode)
+
+
+def maintenance_error():
+    return error("The system is down for maintenance. Try again later.", 503, "maintenance")
 
 
 @app.before_request
 def enforce_maintenance_mode():
-    """Customer/teller API calls are blocked while maintenance mode is on."""
+    """Block every customer and teller API while maintenance mode is on.
+
+    Only admin endpoints, the public settings endpoint, health checks, and the
+    login/session checks needed by staff stay reachable. Customer auth actions
+    such as registration and password changes are blocked as well.
+    """
     path = request.path
-    if not path.startswith("/api/") or any(path.startswith(p) for p in MAINTENANCE_EXEMPT_PREFIXES):
+    if not path.startswith("/api/"):
         return None
-    try:
-        settings_row = db.session.get(BankSetting, 1)
-    except SQLAlchemyError:
+    if path.startswith(MAINTENANCE_ALLOWED_PREFIXES) or path in MAINTENANCE_ALLOWED_PATHS:
         return None
-    if settings_row is None or not settings_row.maintenance_mode:
+    if path == "/api/auth/login":
         return None
-    return error("The system is down for maintenance. Try again later.", 503, "maintenance")
+    if path == "/api/auth/me":
+        user = authenticated_user()
+        if user and user.role in ("ADMIN", "TELLER"):
+            return None
+        return maintenance_error()
+    if not maintenance_mode_enabled():
+        return None
+    return maintenance_error()
 
 
 def primary_account_id(customer_id):
@@ -1528,6 +1568,39 @@ def admin_update_profile():
     return error("Nothing to update.", 400, "no_changes")
 
 
+@app.get("/api/teller/profile")
+@teller_required
+def teller_get_profile():
+    actor = current_user()
+    detail = admin_user_detail(actor)
+    detail["displayName"] = actor.display_name
+    return jsonify(detail)
+
+
+@app.patch("/api/teller/profile")
+@teller_required
+def teller_update_profile():
+    data = body()
+    actor = current_user()
+    if "displayName" not in data:
+        return error("Nothing to update.", 400, "no_changes")
+    display_name = str(data["displayName"] or "").strip()
+    if not display_name:
+        return error("Display name cannot be empty.", 400, "invalid_name")
+    if len(display_name) > 100:
+        return error("Display name must be 100 characters or fewer.", 400, "invalid_name")
+    actor.display_name = display_name
+    log_audit(
+        "USER_PROFILE_UPDATED",
+        "APP_USER",
+        entity_id=actor.user_id,
+        actor_user_id=actor.user_id,
+        details={"displayName": display_name},
+    )
+    db.session.commit()
+    return jsonify(admin_user_detail(actor))
+
+
 @app.get("/api/admin/backups")
 @admin_required
 def admin_list_backups():
@@ -1589,6 +1662,29 @@ def admin_backup_summaries():
     ]
 
 
+@app.delete("/api/admin/backups/<filename>")
+@admin_required
+def admin_delete_backup(filename):
+    if Path(filename).name != filename or not filename.endswith(".sql"):
+        return error("Backup file not found.", 404, "not_found")
+    path = (BACKUP_DIR / filename).resolve()
+    if path.parent != BACKUP_DIR.resolve() or not path.is_file():
+        return error("Backup file not found.", 404, "not_found")
+
+    path.unlink()
+
+    actor = authenticated_user()
+    log_audit(
+        "BACKUP_DELETED",
+        "BACKUP",
+        actor_user_id=actor.user_id,
+        severity="WARN",
+        details={"file": filename},
+    )
+    db.session.commit()
+    return jsonify({"message": f"Deleted {filename}."})
+
+
 @app.post("/api/admin/backups")
 @admin_required
 def admin_generate_backup():
@@ -1642,6 +1738,11 @@ def admin_restore_backup():
         )
     if not RESTORE_SCRIPT.is_file():
         return error("The restore script is not available.", 503, "script_missing")
+
+    # Release this request's connection before the script touches the schema:
+    # the auth check above opens a transaction that holds a metadata lock on
+    # app_users, which would block the restore's DROP TABLE.
+    db.session.remove()
 
     try:
         result = run_project_script(RESTORE_SCRIPT, path, "--yes")
@@ -1710,6 +1811,11 @@ def admin_restore_backup_upload():
         if bytes_written == 0:
             return error("The uploaded file is empty.", 400, "file_empty")
 
+        # Release this request's connection before the script touches the
+        # schema: the auth check above opens a transaction that holds a
+        # metadata lock on app_users, blocking the restore's DROP TABLE.
+        db.session.remove()
+
         try:
             result = run_project_script(RESTORE_SCRIPT, temp_path, "--yes")
         except subprocess.TimeoutExpired:
@@ -1733,6 +1839,68 @@ def admin_restore_backup_upload():
         return jsonify({"message": f"Database restored from {original_name}."})
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+@app.post("/api/admin/backups/delete-database")
+@admin_required
+def admin_delete_database():
+    """Drops every table and recreates the empty schema. Requires explicit
+    typed confirmation because all account and transaction data is erased."""
+    data = body()
+    confirmation = str(data.get("confirm") or "").strip()
+    if confirmation != "DELETE DATABASE":
+        return error(
+            "Type DELETE DATABASE to confirm erasing all data.",
+            400,
+            "confirmation_invalid",
+        )
+
+    actor = authenticated_user()
+    # Snapshot the acting admin before the session is discarded; the account is
+    # reinserted after the wipe so the admin can still sign in and manage the
+    # empty system.
+    admin_values = {
+        column.name: getattr(actor, column.name)
+        for column in AppUser.__table__.columns
+        if column.name != "customer_id"
+    }
+
+    try:
+        db.session.remove()
+        if db.engine.dialect.name == "mysql":
+            # Drop every base table in the database, not only the ones declared
+            # in the models: legacy tables left over from earlier schemas hold
+            # foreign keys into tables such as app_users and customers, which
+            # makes db.drop_all() fail. Foreign key checks are disabled because
+            # the drop order across those legacy constraints is unknown.
+            db.session.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+            table_names = db.session.execute(text(
+                "SELECT TABLE_NAME FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'"
+            )).scalars().all()
+            for table_name in table_names:
+                db.session.execute(text(f"DROP TABLE IF EXISTS `{table_name}`"))
+            db.session.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+            db.create_all()
+        else:
+            db.drop_all()
+            db.create_all()
+        db.session.add(AppUser(**admin_values))
+        log_audit(
+            "DATABASE_DELETED",
+            "DATABASE",
+            actor_user_id=admin_values["user_id"],
+            severity="WARN",
+            details={"userId": str(admin_values["user_id"]), "username": admin_values["username"]},
+        )
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        app.logger.exception("Database delete failed")
+        return error("Could not delete the database.", 500, "delete_failed")
+
+    LOGIN_ATTEMPTS.clear()
+    return jsonify({"message": "Database deleted."})
 
 
 def account_with_owner(account):
@@ -2544,6 +2712,10 @@ def create_request():
             category="CARD",
             link="/dashboard/requests",
         )
+        notify_tellers(
+            "New card request",
+            f"{user.customer.full_name if user.customer else 'A customer'} requested a new card for account {account.account_number}.",
+        )
         db.session.commit()
 
         result = request_row.to_dict()
@@ -2625,6 +2797,10 @@ def create_request():
         f"Your {label.lower()} request of {DEFAULT_CURRENCY} {as_number(amount):,.2f} was sent to the teller for approval.",
         category="REQUEST",
         link="/dashboard/requests",
+    )
+    notify_tellers(
+        f"New {label.lower()} request",
+        f"{user.customer.full_name if user.customer else 'A customer'} requested a {label.lower()} of {DEFAULT_CURRENCY} {as_number(amount):,.2f} for account {account.account_number}.",
     )
     db.session.commit()
 
@@ -2803,6 +2979,44 @@ def teller_list_requests():
     query = TransactionRequest.query.filter(TransactionRequest.transaction_type != "CARD_LOST")
     if status != "ALL":
         query = query.filter_by(status=status)
+
+    request_type = request.args.get("type", "").strip().lower()
+    type_map = {"deposit": "DEPOSIT", "withdrawal": "WITHDRAWAL", "card": "CARD"}
+    if request_type:
+        if request_type not in type_map:
+            return error("Type must be deposit, withdrawal, or card.", 400, "invalid_type")
+        query = query.filter_by(transaction_type=type_map[request_type])
+
+    search = request.args.get("search", "").strip()
+    if search:
+        pattern = f"%{search}%"
+        query = (
+            query
+            .join(Customer, TransactionRequest.customer_id == Customer.customer_id)
+            .join(BankAccount, TransactionRequest.account_id == BankAccount.account_id)
+            .filter(
+                db.or_(
+                    Customer.first_name.ilike(pattern),
+                    Customer.last_name.ilike(pattern),
+                    Customer.email.ilike(pattern),
+                    BankAccount.account_number.ilike(pattern),
+                    TransactionRequest.reference_code.ilike(pattern),
+                )
+            )
+        )
+
+    date_from = parse_date(request.args.get("from"))
+    date_to = parse_date(request.args.get("to"))
+    if date_from:
+        query = query.filter(
+            TransactionRequest.created_at >= datetime(date_from.year, date_from.month, date_from.day)
+        )
+    if date_to:
+        query = query.filter(
+            TransactionRequest.created_at
+            < datetime(date_to.year, date_to.month, date_to.day) + timedelta(days=1)
+        )
+
     rows = query.order_by(TransactionRequest.created_at.desc()).limit(100).all()
     return jsonify([r.to_dict(include_customer=True) for r in rows])
 
@@ -2846,6 +3060,11 @@ def teller_approve_request(request_id):
             category="CARD",
             link="/dashboard",
         )
+        notify_tellers(
+            "Card request approved",
+            f"Request {row.reference_code} was approved by {user.display_name or user.username}.",
+            exclude_user_id=user.user_id,
+        )
         db.session.commit()
         return jsonify(row.to_dict(include_customer=True))
 
@@ -2879,8 +3098,16 @@ def teller_approve_request(request_id):
         category="REQUEST",
         link="/dashboard/requests",
     )
+    notify_tellers(
+        f"{kind.capitalize()} request approved",
+        f"Request {row.reference_code} was approved by {user.display_name or user.username}.",
+        exclude_user_id=user.user_id,
+    )
     db.session.commit()
-    return jsonify(row.to_dict(include_customer=True))
+    response = row.to_dict(include_customer=True)
+    response["transaction"] = _teller_transaction_dict(result)
+    response["account"] = account.to_dict()
+    return jsonify(response)
 
 
 @app.post("/api/teller/requests/<request_id>/reject")
@@ -2924,8 +3151,190 @@ def teller_reject_request(request_id):
         category="REQUEST",
         link="/dashboard/requests",
     )
+    notify_tellers(
+        "Request rejected",
+        f"Request {row.reference_code} was rejected by {user.display_name or user.username}.",
+        exclude_user_id=user.user_id,
+    )
     db.session.commit()
     return jsonify(row.to_dict(include_customer=True))
+
+
+
+def _teller_transactions(teller_user_id, date_from=None, date_to=None):
+    query = Transaction.query.filter(
+        Transaction.performed_by_user_id == teller_user_id,
+        Transaction.status != "VOID",
+    )
+    if date_from:
+        query = query.filter(Transaction.created_at >= datetime(date_from.year, date_from.month, date_from.day))
+    if date_to:
+        query = query.filter(
+            Transaction.created_at
+            < datetime(date_to.year, date_to.month, date_to.day) + timedelta(days=1)
+        )
+    return query.order_by(Transaction.created_at.asc()).all()
+
+
+def _teller_transaction_summary(rows):
+    buckets = {
+        "deposits": {"count": 0, "total": Decimal("0")},
+        "withdrawals": {"count": 0, "total": Decimal("0")},
+        "other": {"count": 0, "total": Decimal("0")},
+    }
+    for tx in rows:
+        if tx.transaction_type == "DEPOSIT":
+            key = "deposits"
+        elif tx.transaction_type == "WITHDRAWAL":
+            key = "withdrawals"
+        else:
+            key = "other"
+        buckets[key]["count"] += 1
+        buckets[key]["total"] += Decimal(str(tx.amount or 0))
+    return {
+        key: {"count": value["count"], "total": as_number(value["total"])}
+        for key, value in buckets.items()
+    }
+
+
+def _teller_transaction_dict(tx):
+    account = db.session.get(BankAccount, tx.account_id)
+    customer = db.session.get(Customer, account.customer_id) if account else None
+    data = tx.to_dict()
+    data["accountNumber"] = account.account_number if account else None
+    data["accountLabel"] = account.type_name.capitalize() if account else None
+    data["customerName"] = customer.full_name if customer else None
+    return data
+
+
+@app.get("/api/teller/transactions")
+@teller_required
+def teller_list_transactions():
+    """Transactions processed by the signed-in teller."""
+    user = current_user()
+    date_from = parse_date(request.args.get("from"))
+    date_to = parse_date(request.args.get("to"))
+    limit = request.args.get("limit", type=int) or 100
+    limit = max(1, min(limit, 200))
+
+    rows = _teller_transactions(user.user_id, date_from, date_to)
+    recent = list(reversed(rows))[:limit]
+    return jsonify({
+        "currency": DEFAULT_CURRENCY,
+        "items": [_teller_transaction_dict(tx) for tx in recent],
+        "summary": _teller_transaction_summary(rows),
+    })
+
+
+@app.get("/api/teller/reports")
+@teller_required
+def teller_reports():
+    """Teller-scoped transaction and request report for a date range."""
+    user = current_user()
+    date_from = parse_date(request.args.get("from"))
+    date_to = parse_date(request.args.get("to"))
+    rows = _teller_transactions(user.user_id, date_from, date_to)
+    now = utcnow()
+    today_rows = _teller_transactions(
+        user.user_id,
+        now.date(),
+        now.date(),
+    )
+
+    daily = {}
+    for tx in rows:
+        key = tx.created_at.date().isoformat()
+        bucket = daily.setdefault(key, {
+            "date": key,
+            "deposits": 0,
+            "depositsTotal": Decimal("0"),
+            "withdrawals": 0,
+            "withdrawalsTotal": Decimal("0"),
+            "net": Decimal("0"),
+        })
+        if tx.transaction_type == "DEPOSIT":
+            bucket["deposits"] += 1
+            bucket["depositsTotal"] += Decimal(str(tx.amount or 0))
+            bucket["net"] += Decimal(str(tx.amount or 0))
+        elif tx.transaction_type == "WITHDRAWAL":
+            bucket["withdrawals"] += 1
+            bucket["withdrawalsTotal"] += Decimal(str(tx.amount or 0))
+            bucket["net"] -= Decimal(str(tx.amount or 0))
+
+    daily_rows = [
+        {
+            "date": bucket["date"],
+            "deposits": bucket["deposits"],
+            "depositsTotal": as_number(bucket["depositsTotal"]),
+            "withdrawals": bucket["withdrawals"],
+            "withdrawalsTotal": as_number(bucket["withdrawalsTotal"]),
+            "net": as_number(bucket["net"]),
+        }
+        for bucket in sorted(daily.values(), key=lambda item: item["date"], reverse=True)
+    ]
+
+    request_query = TransactionRequest.query.filter(
+        TransactionRequest.reviewed_by_user_id == user.user_id,
+        TransactionRequest.status.in_(("APPROVED", "REJECTED")),
+    )
+    if date_from:
+        request_query = request_query.filter(
+            TransactionRequest.reviewed_at >= datetime(date_from.year, date_from.month, date_from.day)
+        )
+    if date_to:
+        request_query = request_query.filter(
+            TransactionRequest.reviewed_at
+            < datetime(date_to.year, date_to.month, date_to.day) + timedelta(days=1)
+        )
+    request_counts = {"approved": 0, "rejected": 0}
+    for row in request_query.all():
+        request_counts[row.status.lower()] = request_counts.get(row.status.lower(), 0) + 1
+    request_counts["total"] = request_counts["approved"] + request_counts["rejected"]
+    return jsonify({
+        "range": _teller_transaction_summary(rows),
+        "today": _teller_transaction_summary(today_rows),
+        "daily": daily_rows,
+        "requests": request_counts,
+    })
+
+
+@app.get("/api/teller/reports/export")
+@teller_required
+def teller_reports_export():
+    """CSV export of the signed-in teller's processed transactions."""
+    user = current_user()
+    date_from = parse_date(request.args.get("from"))
+    date_to = parse_date(request.args.get("to"))
+    transactions = _teller_transactions(user.user_id, date_from, date_to)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        "reference", "date", "type", "amount", "currency", "status",
+        "account", "customer", "note",
+    ])
+    for tx in transactions:
+        account = db.session.get(BankAccount, tx.account_id)
+        customer = db.session.get(Customer, account.customer_id) if account else None
+        writer.writerow([
+            tx.reference_code,
+            tx.created_at.isoformat() if tx.created_at else "",
+            tx.transaction_type.lower(),
+            as_number(tx.amount),
+            DEFAULT_CURRENCY,
+            tx.status.lower(),
+            account.account_number if account else "",
+            customer.full_name if customer else "",
+            tx.description or "",
+        ])
+    response = Response(buffer.getvalue(), mimetype="text/csv")
+    filename = "gellybank_teller_transactions"
+    if date_from:
+        filename += f"_{date_from.isoformat()}"
+    if date_to:
+        filename += f"-{date_to.isoformat()}"
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}.csv"'
+    return response
 
 
 
@@ -3563,6 +3972,9 @@ def login():
             403,
             "email_not_verified",
         )
+
+    if user.role == "CUSTOMER" and maintenance_mode_enabled():
+        return maintenance_error()
 
     user.last_login_at = utcnow()
     clear_login_attempts(email, ip_address)

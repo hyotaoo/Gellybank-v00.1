@@ -73,8 +73,12 @@ export const resetPassword = (token: string, password: string): Promise<{ messag
 export const changePassword = (input: {
   currentPassword: string;
   newPassword: string;
-}): Promise<{ message: string }> =>
-  apiRequest<{ message: string }>('/auth/change-password', { method: 'POST', body: input });
+}, scope?: 'customer' | 'teller' | 'admin'): Promise<{ message: string }> =>
+  apiRequest<{ message: string }>('/auth/change-password', {
+    method: 'POST',
+    body: input,
+    authScope: scope,
+  });
 
 export const getMe = (scope: 'customer' | 'teller' | 'admin'): Promise<AuthUser> =>
   apiRequest<AuthUser>('/auth/me', { authScope: scope });

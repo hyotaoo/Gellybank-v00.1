@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { createContext, useContext, useEffect, useState } from 'react';
 import { getPublicSettings } from '@/api/settings';
 import type { PublicBankSettings } from '@/api/settings';
+import usePolling from '@/hooks/usePolling';
 
 const DEFAULT_SETTINGS: PublicBankSettings = {
   bankName: 'GellyBank',
@@ -26,14 +27,20 @@ export const BankSettingsProvider = ({ children }: { children: ReactNode }) => {
   const [settings, setSettings] = useState<PublicBankSettings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => {
+  const loadSettings = () => {
     getPublicSettings()
       .then((data) => setSettings(data))
       .catch(() => {
         // Keep defaults; branding falls back to GellyBank
       })
       .finally(() => setLoaded(true));
+  };
+
+  useEffect(() => {
+    loadSettings();
   }, []);
+
+  usePolling(loadSettings, 30000);
 
   return (
     <BankSettingsContext.Provider value={{ settings, loaded }}>

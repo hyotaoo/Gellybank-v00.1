@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError } from '@/api/client';
+import type { TokenScope } from '@/api/client';
 import {
   listNotifications,
   markAllNotificationsRead,
@@ -27,7 +28,11 @@ const categoryLabel: Record<string, string> = {
 
 const REFRESH_INTERVAL_MS = 60_000;
 
-const NotificationsDropdown = () => {
+interface NotificationsDropdownProps {
+  scope?: TokenScope;
+}
+
+const NotificationsDropdown = ({ scope }: NotificationsDropdownProps) => {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
@@ -38,7 +43,7 @@ const NotificationsDropdown = () => {
 
   const load = useCallback(async () => {
     try {
-      const data = await listNotifications();
+      const data = await listNotifications(undefined, scope);
       setItems(data.items);
       setUnread(data.unread);
       setError(null);
@@ -49,7 +54,7 @@ const NotificationsDropdown = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scope]);
 
   useEffect(() => {
     setLoading(true);
@@ -83,7 +88,7 @@ const NotificationsDropdown = () => {
       );
       setUnread((count) => Math.max(0, count - 1));
       try {
-        await markNotificationRead(notification.id);
+        await markNotificationRead(notification.id, scope);
       } catch {
         void load();
       }
@@ -96,7 +101,7 @@ const NotificationsDropdown = () => {
     setItems((current) => current.map((item) => ({ ...item, read: true })));
     setUnread(0);
     try {
-      await markAllNotificationsRead();
+      await markAllNotificationsRead(scope);
     } catch {
       void load();
     }

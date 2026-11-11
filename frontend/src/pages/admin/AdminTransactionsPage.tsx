@@ -9,6 +9,7 @@ import {
 import type { AdminTransaction } from '@/api/admin';
 import Button from '@/components/common/Button';
 import Textarea from '@/components/common/Textarea';
+import { useToast } from '@/components/common/Toast';
 import usePolling from '@/hooks/usePolling';
 import { formatCurrency, formatDateTime as formatDateTimeValue } from '@/utils/format';
 
@@ -41,7 +42,7 @@ const AdminTransactionsPage = () => {
   const [to, setTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [notice, setNotice] = useState<string>();
+  const toast = useToast();
 
   const [detail, setDetail] = useState<AdminTransaction>();
   const [detailLoading, setDetailLoading] = useState(false);
@@ -93,16 +94,15 @@ const AdminTransactionsPage = () => {
     if (!detail) return;
     setReversing(true);
     setError(undefined);
-    setNotice(undefined);
     try {
       const reversed = await reverseAdminTransaction(detail.id, reason.trim());
-      setNotice(`Transaction ${reversed.reference} was reversed.`);
+      toast.success(`Transaction ${reversed.reference} was reversed.`);
       setReversing(false);
       setReason('');
       await refresh();
       setDetail(reversed);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to reverse this transaction.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to reverse this transaction.');
     } finally {
       setReversing(false);
     }
@@ -196,7 +196,6 @@ const AdminTransactionsPage = () => {
       </div>
 
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
 
       <div className="overflow-x-auto rounded-2xl border border-surface-line bg-white">
         {loading ? (

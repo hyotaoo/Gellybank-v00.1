@@ -52,6 +52,7 @@ CUSTOMER_AVATAR_MIGRATION_FILE = BACKEND / "db" / "migrations" / "011_customer_a
 ADMIN_MANAGEMENT_MIGRATION_FILE = BACKEND / "db" / "migrations" / "012_admin_management.sql"
 CUSTOMER_PROFILE_MIGRATION_FILE = BACKEND / "db" / "migrations" / "013_customer_profile_details.sql"
 PASSWORD_HISTORY_MIGRATION_FILE = BACKEND / "db" / "migrations" / "014_password_history.sql"
+REQUEST_REFERENCE_MIGRATION_FILE = BACKEND / "db" / "migrations" / "015_request_references.sql"
 BACKEND_REQUIREMENTS = BACKEND / "requirements.txt"
 BACKUP_SCRIPT = ROOT / "scripts" / "backup_db.sh"
 RESTORE_SCRIPT = ROOT / "scripts" / "restore_db.sh"
@@ -929,7 +930,7 @@ def _migration_statement_exists(cursor, statement: str) -> bool:
         return cursor.fetchone() is not None
 
     create_index = re.match(
-        r"^\s*CREATE\s+INDEX\s+`?(\w+)`?\s+ON\s+`?(\w+)`?",
+        r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+`?(\w+)`?\s+ON\s+`?(\w+)`?",
         statement,
         re.IGNORECASE,
     )
@@ -1000,6 +1001,7 @@ def _run_schema_migrations(connection) -> bool:
             ADMIN_MANAGEMENT_MIGRATION_FILE,
             CUSTOMER_PROFILE_MIGRATION_FILE,
             PASSWORD_HISTORY_MIGRATION_FILE,
+            REQUEST_REFERENCE_MIGRATION_FILE,
         ):
             if not migration_file.exists():
                 log_line(f"{relative(migration_file)} is missing.")

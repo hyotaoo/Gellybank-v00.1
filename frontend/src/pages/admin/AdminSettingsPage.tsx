@@ -7,6 +7,7 @@ import Button from '@/components/common/Button';
 import Field from '@/components/common/Field';
 import Input from '@/components/common/Input';
 import Textarea from '@/components/common/Textarea';
+import { useToast } from '@/components/common/Toast';
 
 const MAX_LOGO_BYTES = 1_048_576;
 
@@ -50,7 +51,7 @@ const AdminSettingsPage = () => {
   const [saving, setSaving] = useState(false);
   const [confirmingMaintenance, setConfirmingMaintenance] = useState(false);
   const [error, setError] = useState<string>();
-  const [savedMessage, setSavedMessage] = useState<string>();
+  const toast = useToast();
 
   // Last saved snapshot, used to warn about (and show) pending changes.
   const [saved, setSaved] = useState<Record<string, unknown>>({});
@@ -108,14 +109,12 @@ const AdminSettingsPage = () => {
 
   const persist = async (patch: Record<string, unknown>, message: string) => {
     setSaving(true);
-    setError(undefined);
-    setSavedMessage(undefined);
     try {
       const data = await updateAdminSettings(patch);
       applyLoaded(data);
-      setSavedMessage(message);
+      toast.success(message);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to save settings.');
+      toast.error(err instanceof ApiError ? err.message : 'Unable to save settings.');
     } finally {
       setSaving(false);
     }
@@ -124,7 +123,7 @@ const AdminSettingsPage = () => {
   // Shows the confirmation form before anything is actually saved.
   const requestSave = (patch: Record<string, unknown>, message: string) => {
     if (changesFor(patch).length === 0) {
-      setSavedMessage('No changes to save.');
+      toast.success('No changes to save.');
       return;
     }
     setPendingSave({ patch, message });
@@ -146,12 +145,12 @@ const AdminSettingsPage = () => {
     event.target.value = '';
     if (!file) return;
     if (file.size > MAX_LOGO_BYTES) {
-      setError('Logo must be an image up to 1 MB.');
+      toast.error('Logo must be an image up to 1 MB.');
       return;
     }
     const dataUrl = await readLogoFile(file).catch(() => undefined);
     if (!dataUrl) {
-      setError('Unable to read the image file.');
+      toast.error('Unable to read the image file.');
       return;
     }
     requestSave({ logo: dataUrl }, 'Logo updated.');
@@ -185,7 +184,6 @@ const AdminSettingsPage = () => {
       </header>
 
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      {savedMessage && <p role="status" className="text-sm text-green-700">{savedMessage}</p>}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-surface-line bg-white p-6">
