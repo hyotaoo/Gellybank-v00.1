@@ -81,6 +81,41 @@ ADMIN_ERROR_CODES = (1044, 1045, 1049, 1142, 1698)
 
 PROCESSES: dict[str, subprocess.Popen] = {}
 LOG_LOCK = threading.Lock()
+DEV_LOG_PATH = ROOT / "dev-tool.log"
+
+
+class _Tee:
+    """Writes to the real stream and dev-tool.log so teammates can attach the log."""
+
+    def __init__(self, stream, sink) -> None:
+        self.stream = stream
+        self.sink = sink
+        self.lock = threading.Lock()
+
+    def write(self, data: str) -> int:
+        with self.lock:
+            self.stream.write(data)
+            self.sink.write(data)
+            self.sink.flush()
+        return len(data)
+
+    def flush(self) -> None:
+        with self.lock:
+            self.stream.flush()
+            self.sink.flush()
+
+
+def _start_log_file() -> None:
+    try:
+        sink = open(DEV_LOG_PATH, "a", encoding="utf-8", errors="replace")
+    except OSError as exc:
+        print(f"Could not write {DEV_LOG_PATH.name}: {exc}")
+        return
+    sink.write(f"\n==== Session {time.strftime('%Y-%m-%d %H:%M:%S')} ({platform.system()}) ====\n")
+    sink.flush()
+    sys.stdout = _Tee(sys.stdout, sink)
+    sys.stderr = _Tee(sys.stderr, sink)
+    print(f"Logging this session to {DEV_LOG_PATH.name}")
 
 DB_CHECK_CODE = """
 import os, sys
@@ -543,6 +578,10 @@ def show_status() -> None:
     else:
         database_detail, database_state = f"{env_database_name()} not ready", "missing"
     smtp_values = read_env_file()
+    bash_path = find_bash()
+    client_missing = [
+        name for name in ("mysqldump", "mysql") if shutil.which(name) is None
+    ]
     if smtp_values.get("SMTP_HOST"):
         email_detail, email_state = f"{smtp_values['SMTP_HOST']}:{smtp_values.get('SMTP_PORT', '587')}", "ok"
     else:
@@ -552,6 +591,8 @@ def show_status() -> None:
         ("Node.js", node_version() or "not found", "ok" if node_version() else "missing"),
         ("npm", npm_version() or "not found", "ok" if npm_version() else "missing"),
         ("MySQL", f"{DB_HOST}:{DB_PORT}" if port_in_use(DB_PORT, DB_HOST) else "not running", "ok" if port_in_use(DB_PORT, DB_HOST) else "missing"),
+        ("MySQL client tools", "mysqldump + mysql" if not client_missing else "missing: " + ", ".join(client_missing), "ok" if not client_missing else "missing"),
+        ("bash", bash_path or "not found (install Git for Windows)", "ok" if bash_path else "missing"),
         ("Virtual env", relative(VENV) if venv_exists() else "not created", "ok" if venv_exists() else "missing"),
         ("Python packages", "installed" if packages_installed() else "not installed", "ok" if packages_installed() else "missing"),
         ("backend/.env", "written" if env_written() else "not written", "ok" if env_written() else "missing"),
@@ -698,15 +739,32 @@ def remove_admin_account() -> bool:
     return run_role_script("delete_admin.py", "remove", "admin")
 
 
+def find_bash() -> str | None:
+    """Resolves a bash executable: PATH first, then Git for Windows."""
+    bash = shutil.which("bash")
+    if bash:
+        return bash
+    if os.name == "nt":
+        for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if not base:
+                continue
+            for sub in ("Git/bin/bash.exe", "Git/usr/bin/bash.exe"):
+                candidate = Path(base) / sub
+                if candidate.is_file():
+                    return str(candidate)
+    return None
+
+
 def run_project_script(script: Path, *arguments: str) -> bool:
     if not script.exists():
         log_line(f"{relative(script)} is missing.")
         return False
-    if not shutil.which("bash"):
-        log_line("bash not found. Database backup and restore require bash.")
+    bash = find_bash()
+    if not bash:
+        log_line("bash not found. Database backup and restore require bash (on Windows, install Git for Windows).")
         return False
     try:
-        result = subprocess.run(["bash", str(script), *arguments], cwd=str(ROOT))
+        result = subprocess.run([bash, str(script), *arguments], cwd=str(ROOT))
     except OSError as exc:
         log_line(f"Could not run {relative(script)}: {exc}")
         return False
@@ -1702,6 +1760,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--internal-db-setup", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--internal-schema-migration", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+
+    if not (args.internal_db_setup or args.internal_schema_migration):
+        _start_log_file()
 
     if args.internal_db_setup:
         try:

@@ -124,7 +124,9 @@ const TellerLoginPage = () => {
 
           {showForgotPassword && (
             <a
-              href="mailto:support@gellybank.com"
+              href="https://mail.google.com/mail/?view=cm&fs=1&to=support@gellybank.com&su=Forgot%20Password"
+              target="_blank"
+              rel="noopener noreferrer"
               className="w-fit text-[14px] font-medium leading-[1.21] text-ink hover:text-primary hover:underline"
             >
               Forgot Password

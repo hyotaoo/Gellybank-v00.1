@@ -190,7 +190,7 @@ class DevToolTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_run_project_script_requires_bash(self):
-        with patch.object(dev.shutil, "which", return_value=None), patch.object(
+        with patch.object(dev, "find_bash", return_value=None), patch.object(
             dev.subprocess, "run"
         ) as run:
             self.assertFalse(dev.run_project_script(dev.BACKUP_SCRIPT))

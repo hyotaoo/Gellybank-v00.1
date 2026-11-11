@@ -5,6 +5,7 @@ import CreditCardIcon from '@/components/icons/CreditCardIcon';
 import HistoryIcon from '@/components/icons/HistoryIcon';
 import HomeIcon from '@/components/icons/HomeIcon';
 import ProfileIcon from '@/components/icons/ProfileIcon';
+import PaperIcon from '@/components/icons/PaperIcon';
 import TransferIcon from '@/components/icons/TransferIcon';
 import WalletIcon from '@/components/icons/WalletIcon';
 import SettingsIcon from '@/components/icons/SettingsIcon';
@@ -15,7 +16,7 @@ const navItems: PortalNavItem[] = [
   { label: 'Accounts', to: '/admin/accounts', icon: <WalletIcon className="h-5 w-5" /> },
   { label: 'Transactions', to: '/admin/transactions', icon: <TransferIcon className="h-5 w-5" /> },
   { label: 'Reports', to: '/admin/reports', icon: <HistoryIcon className="h-5 w-5" /> },
-  { label: 'Applications', to: '/admin/applications', icon: <CreditCardIcon className="h-5 w-5" /> },
+  { label: 'Applications', to: '/admin/applications', icon: <PaperIcon className="h-5 w-5" /> },
   { label: 'Card requests', to: '/admin/card-requests', icon: <CreditCardIcon className="h-5 w-5" /> },
   { label: 'Audit logs', to: '/admin/logs', icon: <HistoryIcon className="h-5 w-5" /> },
   { label: 'Backups', to: '/admin/backups', icon: <WalletIcon className="h-5 w-5" /> },

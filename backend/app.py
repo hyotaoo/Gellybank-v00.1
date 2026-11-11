@@ -9,6 +9,7 @@ import binascii
 import hashlib
 import hmac
 import secrets
+import shutil
 import subprocess
 import tempfile
 import time
@@ -1637,9 +1638,32 @@ BACKUP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "backup_db.
 RESTORE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "restore_db.sh"
 
 
+def find_bash():
+    """Resolves a bash executable: PATH first, then Git for Windows."""
+    bash = shutil.which("bash")
+    if bash:
+        return bash
+    if os.name == "nt":
+        for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if not base:
+                continue
+            for sub in ("Git/bin/bash.exe", "Git/usr/bin/bash.exe"):
+                candidate = Path(base) / sub
+                if candidate.is_file():
+                    return str(candidate)
+    return None
+
+
+class BashNotFoundError(OSError):
+    pass
+
+
 def run_project_script(script_path, *args):
+    bash = find_bash()
+    if bash is None:
+        raise BashNotFoundError("bash was not found on this machine.")
     result = subprocess.run(
-        ["bash", str(script_path), *(str(arg) for arg in args)],
+        [bash, str(script_path), *(str(arg) for arg in args)],
         capture_output=True,
         text=True,
         timeout=600,
@@ -1696,6 +1720,8 @@ def admin_generate_backup():
         result = run_project_script(BACKUP_SCRIPT)
     except subprocess.TimeoutExpired:
         return error("The backup timed out.", 503, "backup_timeout")
+    except BashNotFoundError:
+        return error("bash was not found. Install Git for Windows or add bash to PATH, then restart the backend.", 503, "bash_missing")
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip().splitlines()
         return error(detail[-1] if detail else "Backup generation failed.", 503, "backup_failed")
@@ -1748,6 +1774,8 @@ def admin_restore_backup():
         result = run_project_script(RESTORE_SCRIPT, path, "--yes")
     except subprocess.TimeoutExpired:
         return error("The restore timed out.", 503, "restore_timeout")
+    except BashNotFoundError:
+        return error("bash was not found. Install Git for Windows or add bash to PATH, then restart the backend.", 503, "bash_missing")
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip().splitlines()
         return error(detail[-1] if detail else "Restore failed.", 503, "restore_failed")
@@ -1820,6 +1848,8 @@ def admin_restore_backup_upload():
             result = run_project_script(RESTORE_SCRIPT, temp_path, "--yes")
         except subprocess.TimeoutExpired:
             return error("The restore timed out.", 503, "restore_timeout")
+        except BashNotFoundError:
+            return error("bash was not found. Install Git for Windows or add bash to PATH, then restart the backend.", 503, "bash_missing")
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip().splitlines()
             return error(detail[-1] if detail else "Restore failed.", 503, "restore_failed")
